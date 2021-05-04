@@ -18,6 +18,14 @@ use pin_project::pin_project;
 use serde::Serialize;
 #[cfg(feature = "serde_qs")]
 use serde_qs::actix::QsQuery;
+#[cfg(feature = "actix-web-validator")]
+use actix_web_validator::{Query as ValidatedQuery};
+#[cfg(feature = "actix-web-validator")]
+use actix_web_validator::{Path as ValidatedPath};
+#[cfg(feature = "actix-web-validator")]
+use actix_web_validator::{Json as ValidatedJson};
+#[cfg(feature = "actix-web-validator")]
+use actix_web_validator::{QsQuery as ValidatedQsQuery};
 
 use std::{
     collections::BTreeMap,
@@ -379,6 +387,14 @@ impl_param_extractor!(Query<T> => Query);
 impl_param_extractor!(Form<T> => FormData);
 #[cfg(feature = "serde_qs")]
 impl_param_extractor!(QsQuery<T> => Query);
+#[cfg(feature = "actix-web-validator")]
+impl_param_extractor!(ValidatedPath<T> => Path);
+#[cfg(feature = "actix-web-validator")]
+impl_param_extractor!(ValidatedQuery<T> => Query);
+#[cfg(feature = "actix-web-validator")]
+impl_param_extractor!(ValidatedQsQuery<T> => Query);
+#[cfg(feature = "actix-web-validator")]
+impl_param_extractor!(ValidatedJson<T> => Body);
 
 macro_rules! impl_path_tuple ({ $($ty:ident),+ } => {
     #[cfg(feature = "nightly")]
