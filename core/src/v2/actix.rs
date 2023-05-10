@@ -15,6 +15,8 @@ use super::{
 #[cfg(not(feature = "actix4"))]
 use crate::util::{ready, Ready};
 #[cfg(feature = "actix-multipart")]
+use actix_multipart::form::text::Text;
+#[cfg(feature = "actix-multipart")]
 use actix_multipart::form::{MultipartCollect, MultipartForm};
 #[cfg(any(feature = "actix3", feature = "actix4"))]
 use actix_web::web::ReqData;
@@ -43,6 +45,8 @@ use actix_web_validator::{
     Json as ValidatedJson, Path as ValidatedPath, QsQuery as ValidatedQsQuery,
     Query as ValidatedQuery,
 };
+#[cfg(feature = "actix-multipart")]
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 #[cfg(any(feature = "serde_qs-actix3", feature = "serde_qs-actix4"))]
 use serde_qs::actix::QsQuery;
@@ -517,6 +521,28 @@ impl<T: Apiv2Schema> Apiv2Schema for Form<T> {
 
 #[cfg(feature = "actix-multipart")]
 impl<T: MultipartCollect + Apiv2Schema> Apiv2Schema for MultipartForm<T> {
+    fn name() -> Option<String> {
+        T::name()
+    }
+
+    fn raw_schema() -> DefaultSchemaRaw {
+        T::raw_schema()
+    }
+}
+
+#[cfg(feature = "actix-multipart")]
+impl<T: DeserializeOwned + Apiv2Schema> Apiv2Schema for Text<T> {
+    fn name() -> Option<String> {
+        T::name()
+    }
+
+    fn raw_schema() -> DefaultSchemaRaw {
+        T::raw_schema()
+    }
+}
+
+#[cfg(feature = "actix-multipart")]
+impl<T: DeserializeOwned + Apiv2Schema> Apiv2Schema for actix_multipart::form::json::Json<T> {
     fn name() -> Option<String> {
         T::name()
     }

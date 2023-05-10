@@ -15,7 +15,7 @@ prepare:
 
 check:
 	cargo +nightly fmt --all
-	cargo clippy --all --features "actix4" -- -D clippy::all
+	cargo clippy --all --features "actix4, actix-multipart" -- -D clippy::all
 
 check_nightly:
 	cargo +nightly fmt --all
