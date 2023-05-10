@@ -14,6 +14,8 @@ use super::{
 };
 #[cfg(not(feature = "actix4"))]
 use crate::util::{ready, Ready};
+#[cfg(feature = "actix-multipart")]
+use actix_multipart::form::MultipartForm;
 #[cfg(any(feature = "actix3", feature = "actix4"))]
 use actix_web::web::ReqData;
 #[cfg(not(feature = "actix4"))]
@@ -48,7 +50,6 @@ use serde_qs::actix::QsQuery;
 use serde_qs_actix3 as serde_qs;
 #[cfg(any(feature = "serde_qs-actix4", feature = "serde_qs"))]
 use serde_qs_actix4 as serde_qs;
-
 use std::{
     collections::BTreeMap,
     fmt,
@@ -56,7 +57,6 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use actix_multipart::form::MultipartForm;
 
 /// Actix-specific trait for indicating that this entity can modify an operation
 /// and/or update the global map of definitions.
@@ -518,7 +518,8 @@ impl<T: Apiv2Schema> Apiv2Schema for Form<T> {
 impl_param_extractor!(Path<T> => Path);
 impl_param_extractor!(Query<T> => Query);
 impl_param_extractor!(Form<T> => FormData);
-impl_param_extractor!(MultipartForm<T> => FormData);
+#[cfg(feature = "actix-multipart")]
+impl_param_extractor!(MultipartForm<T: MultipartCollect> => FormData);
 #[cfg(any(
     feature = "serde_qs-actix3",
     feature = "serde_qs-actix4",
