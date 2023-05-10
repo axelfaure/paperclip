@@ -15,7 +15,7 @@ use super::{
 #[cfg(not(feature = "actix4"))]
 use crate::util::{ready, Ready};
 #[cfg(feature = "actix-multipart")]
-use actix_multipart::form::MultipartForm;
+use actix_multipart::form::{MultipartCollect, MultipartForm};
 #[cfg(any(feature = "actix3", feature = "actix4"))]
 use actix_web::web::ReqData;
 #[cfg(not(feature = "actix4"))]
@@ -515,11 +515,41 @@ impl<T: Apiv2Schema> Apiv2Schema for Form<T> {
     }
 }
 
+#[cfg(feature = "actix-multipart")]
+impl<T: MultipartCollect + Apiv2Schema> Apiv2Schema for MultipartForm<T> {
+    fn name() -> Option<String> {
+        T::name()
+    }
+
+    fn raw_schema() -> DefaultSchemaRaw {
+        T::raw_schema()
+    }
+}
+
+#[cfg(feature = "actix-multipart")]
+impl<T: MultipartCollect + Apiv2Schema> OperationModifier for MultipartForm<T> {
+    fn update_parameter(op: &mut DefaultOperationRaw) {
+        let def = T::raw_schema();
+        for (k, v) in def.properties {
+            op.parameters.push(Either::Right(Parameter {
+                in_: ParameterIn::FormData,
+                required: def.required.contains(&k),
+                data_type: v.data_type,
+                format: v.format,
+                enum_: v.enum_,
+                description: v.description,
+                collection_format: None, // this defaults to csv
+                items: v.items.as_deref().map(map_schema_to_items),
+                name: k,
+                ..Default::default()
+            }));
+        }
+    }
+}
+
 impl_param_extractor!(Path<T> => Path);
 impl_param_extractor!(Query<T> => Query);
 impl_param_extractor!(Form<T> => FormData);
-#[cfg(feature = "actix-multipart")]
-impl_param_extractor!(MultipartForm<T: MultipartCollect> => FormData);
 #[cfg(any(
     feature = "serde_qs-actix3",
     feature = "serde_qs-actix4",
