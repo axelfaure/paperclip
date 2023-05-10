@@ -101,6 +101,7 @@ uuid0 = ["paperclip-core/uuid0"]
 uuid1 = ["paperclip-core/uuid1"]
 serde_qs-actix3 = ["paperclip-core/serde_qs-actix3"]
 serde_qs-actix4 = ["paperclip-core/serde_qs-actix4"]
+serde_qs = ["paperclip-core/serde_qs-actix4"]
 
 [workspace]
 members = [
