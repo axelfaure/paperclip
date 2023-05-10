@@ -28,6 +28,14 @@ use actix_web::{
 
 use pin_project_lite::pin_project;
 
+#[cfg(feature = "actix-web-validator")]
+use actix_web_validator::Json as ValidatedJson;
+#[cfg(feature = "actix-web-validator")]
+use actix_web_validator::Path as ValidatedPath;
+#[cfg(feature = "actix-web-validator")]
+use actix_web_validator::QsQuery as ValidatedQsQuery;
+#[cfg(feature = "actix-web-validator")]
+use actix_web_validator::Query as ValidatedQuery;
 #[cfg(any(feature = "actix4-validator", feature = "actix3-validator"))]
 use actix_web_validator::{
     Json as ValidatedJson, Path as ValidatedPath, QsQuery as ValidatedQsQuery,
@@ -36,14 +44,6 @@ use actix_web_validator::{
 use serde::Serialize;
 #[cfg(feature = "serde_qs")]
 use serde_qs::actix::QsQuery;
-#[cfg(feature = "actix-web-validator")]
-use actix_web_validator::{Query as ValidatedQuery};
-#[cfg(feature = "actix-web-validator")]
-use actix_web_validator::{Path as ValidatedPath};
-#[cfg(feature = "actix-web-validator")]
-use actix_web_validator::{Json as ValidatedJson};
-#[cfg(feature = "actix-web-validator")]
-use actix_web_validator::{QsQuery as ValidatedQsQuery};
 
 use std::{
     collections::BTreeMap,
