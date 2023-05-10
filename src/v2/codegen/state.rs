@@ -1,6 +1,7 @@
 use super::{
+    object,
     object::ApiObject,
-    template::{self, TEMPLATE},
+    template::{self, Template},
     CrateMeta, EmitMode,
 };
 use crate::{
@@ -8,11 +9,11 @@ use crate::{
     v2::models::{Coders, SpecFormat},
 };
 use anyhow::Error;
-use heck::CamelCase;
+use heck::ToPascalCase;
 #[cfg(feature = "cli")]
-use heck::SnekCase;
+use heck::ToSnakeCase;
 use itertools::Itertools;
-use url::Url;
+use url_dep::Url;
 
 #[cfg(feature = "cli")]
 use std::fs;
@@ -112,7 +113,7 @@ impl EmitterState {
             .map(|(r, c)| (r.0.as_ref(), c))
             .map(|(r, c)| MediaCoder {
                 range: r.into(),
-                error_variant: r.replace('*', "wildcard").to_camel_case(),
+                error_variant: r.replace('*', "wildcard").to_pascal_case(),
                 error_ty_path: c.error_path.clone(),
                 decoder: c.decoder_path.clone(),
             })
@@ -127,7 +128,7 @@ impl EmitterState {
         let is_app = self.is_cli()?;
         let mods = self.mod_children.borrow();
         for (rel_parent, children) in &*mods {
-            let mut mod_path = self.working_dir.join(&rel_parent);
+            let mut mod_path = self.working_dir.join(rel_parent);
             let mut contents = String::new();
 
             if rel_parent.parent().is_none() && self.needs_root_module() {
@@ -219,7 +220,7 @@ pub mod {name} {{
                     .struct_fields_iter()
                     .filter(|f| f.prop.is_required())
                     .for_each(|f| {
-                        unit_types.insert(f.name.to_camel_case());
+                        unit_types.insert(object::to_pascal_case(f.name));
                     });
 
                 builder_content.push('\n');
@@ -272,17 +273,17 @@ pub mod util {
         for ty in &*types {
             content.push_str("\npub struct Missing");
             content.push_str(ty);
-            content.push_str(";");
+            content.push(';');
             content.push_str("\npub struct ");
             content.push_str(ty);
             content.push_str("Exists;");
         }
 
-        content.push_str("\n");
+        content.push('\n');
         self.write_contents(&content, &module)?;
 
         module.set_file_name("util.rs");
-        let contents = template::render(TEMPLATE::UTIL_MOD, &EmptyContext {})?;
+        let contents = template::render(Template::UTIL_MOD, &EmptyContext {})?;
         self.write_contents(&contents, &module)?;
 
         self.add_cli_deps_if_needed()?;
@@ -293,10 +294,10 @@ pub mod util {
     pub(crate) fn add_client_deps(&self) -> Result<(), Error> {
         let module = self.root_module_path();
         let contents = template::render(
-            TEMPLATE::CLIENT_MOD,
+            Template::CLIENT_MOD,
             &ClientModContext {
                 mod_prefix: &self.normalized_mod_prefix(),
-                media_coders: &*self.media_coders.borrow(),
+                media_coders: &self.media_coders.borrow(),
                 base_url: self.base_url.borrow().as_str(),
             },
         )?;
@@ -336,7 +337,7 @@ pub mod util {
             // Clap YAML
             let clap_yaml = root.with_file_name("app.yaml");
             let base_content = template::render(
-                TEMPLATE::CLAP_YAML,
+                Template::CLAP_YAML,
                 &ClapYamlContext {
                     name: meta.name.as_ref().unwrap(),
                     version: &format!("{:?}", meta.version.as_ref().unwrap()),
@@ -345,14 +346,14 @@ pub mod util {
 
             let cli_mod = root.with_file_name("cli.rs");
             self.write_contents(&base_content, &clap_yaml)?;
-            self.append_contents(&*self.cli_yaml.borrow(), &clap_yaml)?;
+            self.append_contents(&self.cli_yaml.borrow(), &clap_yaml)?;
 
             // CLI module
             let cli_content = template::render(
-                TEMPLATE::CLI_UTIL,
+                Template::CLI_UTIL,
                 &CliUtilContext {
-                    match_arms: &*self.cli_match_arms.borrow(),
-                    media_coders: &*self.media_coders.borrow(),
+                    match_arms: &self.cli_match_arms.borrow(),
+                    media_coders: &self.media_coders.borrow(),
                 },
             )?;
 
@@ -360,7 +361,7 @@ pub mod util {
         }
 
         // `main.rs`
-        let contents = template::render(TEMPLATE::CLI_MAIN, &EmptyContext {})?;
+        let contents = template::render(Template::CLI_MAIN, &EmptyContext {})?;
         self.append_contents(&contents, &root)
     }
 
@@ -441,7 +442,7 @@ impl EmitterState {
 
         if self.needs_root_module() {
             let contents = template::render(
-                TEMPLATE::CARGO_MANIFEST,
+                Template::CARGO_MANIFEST,
                 &ManifestContext {
                     name: &format!("{:?}", meta.name.as_ref().unwrap()),
                     version: &format!("{:?}", meta.version.as_ref().unwrap()),
@@ -468,7 +469,7 @@ impl EmitterState {
                         .ok_or(PaperClipError::InvalidCodegenDirectory)?
                         .to_string_lossy()
                         .into_owned()
-                        .to_snek_case(),
+                        .to_snake_case(),
                 );
             }
 
@@ -481,7 +482,7 @@ impl EmitterState {
                 if let Some(e) = email {
                     name.push_str(" <");
                     name.push_str(&e);
-                    name.push_str(">");
+                    name.push('>');
                 }
 
                 meta.authors = Some(vec![name]);

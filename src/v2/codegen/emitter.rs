@@ -18,19 +18,18 @@ use crate::{
     },
 };
 use anyhow::Error;
-use heck::{CamelCase, SnekCase};
+use heck::{ToPascalCase, ToSnakeCase};
 use http::{header::HeaderName, HeaderMap};
 use itertools::Itertools;
-use parking_lot::RwLock;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     fmt::Debug,
     fs,
     ops::Deref,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
-use url::Host;
+use url_dep::Host;
 
 /// Identifier used for `Any` generic parameters in struct definitions.
 pub(super) const ANY_GENERIC_PARAMETER: &str = "Any";
@@ -118,7 +117,7 @@ pub trait Emitter: Sized {
 
     /// Returns an iterator of path components for the given definition.
     ///
-    /// **NOTE:** All components are [snake_cased](https://docs.rs/heck/*/heck/trait.SnekCase.html)
+    /// **NOTE:** All components are [snake_cased](https://docs.rs/heck/*/heck/trait.SnakeCase.html)
     /// (including the definition name).
     fn def_ns_name<'a>(
         &self,
@@ -126,7 +125,7 @@ pub trait Emitter: Sized {
     ) -> Result<Box<dyn Iterator<Item = String> + 'a>, Error> {
         let state = self.state();
         def.name()
-            .map(|n| n.split(state.ns_sep).map(SnekCase::to_snek_case))
+            .map(|n| n.split(state.ns_sep).map(ToSnakeCase::to_snake_case))
             .ok_or_else(|| {
                 trace!("Missing name for definition: '{:?}'", def);
                 PaperClipError::MissingDefinitionName.into()
@@ -140,7 +139,7 @@ pub trait Emitter: Sized {
         Ok(self
             .def_ns_name(def)?
             .last()
-            .map(|s| s.to_camel_case())
+            .map(|s| s.to_pascal_case())
             .expect("last item always exists for split?"))
     }
 
@@ -151,14 +150,14 @@ pub trait Emitter: Sized {
         let mut name = String::new();
         parents.iter().for_each(|s| {
             name.push_str(s);
-            name.push_str("_");
+            name.push('_');
         });
 
         if name.is_empty() {
             trace!("Unable to get name for anonymous schema: {:?}", def);
             None
         } else {
-            Some(name.to_camel_case())
+            Some(name.to_pascal_case())
         }
     }
 
@@ -172,12 +171,9 @@ pub trait Emitter: Sized {
         let _ = def;
 
         let name = match value {
-            Value::Number(ref n) => format!(
-                "Number_{}",
-                n.to_string().replace('-', "_").replace('.', "_")
-            ),
-            Value::Bool(b) => b.to_string().to_camel_case(),
-            Value::String(ref s) => s.to_string().to_camel_case(),
+            Value::Number(ref n) => format!("Number_{}", n.to_string().replace(['-', '.'], "_")),
+            Value::Bool(b) => b.to_string().to_pascal_case(),
+            Value::String(ref s) => s.to_string().to_pascal_case().replace('.', "_"),
             _ => return None,
         };
 
@@ -204,11 +200,10 @@ pub trait Emitter: Sized {
     /// **NOTE:** This should set `.rs` extension to the leaf path component.
     fn unknown_op_mod_path(
         &self,
-        path: &str,
-        method: HttpMethod,
-        op: &ResolvableOperation<Self::Definition>,
+        _path: &str,
+        _method: HttpMethod,
+        _op: &ResolvableOperation<Self::Definition>,
     ) -> Result<PathBuf, Error> {
-        let _ = (path, method, op);
         let state = self.state();
         let mut path = state.working_dir.clone();
         path.push("miscellaneous");
@@ -224,11 +219,10 @@ pub trait Emitter: Sized {
     /// creating `ApiObject`. Others may be overridden.
     fn unknown_op_object(
         &self,
-        path: &str,
-        method: HttpMethod,
-        op: &ResolvableOperation<Self::Definition>,
+        _path: &str,
+        _method: HttpMethod,
+        _op: &ResolvableOperation<Self::Definition>,
     ) -> Result<ApiObject, Error> {
-        let _ = (path, method, op);
         Ok(ApiObject {
             name: "Miscellaneous".into(),
             description: Some(
@@ -246,6 +240,7 @@ pub trait Emitter: Sized {
     /// inside Rust modules in the configured working directory.
     ///
     /// **NOTE:** Not meant to be overridden.
+    #[allow(clippy::field_reassign_with_default)]
     fn generate(&self, api: &ResolvableApi<Self::Definition>) -> Result<(), Error> {
         let state = self.state();
         state.reset_internal_fields();
@@ -281,13 +276,12 @@ pub trait Emitter: Sized {
             let mut u = state.base_url.borrow_mut();
             if let Some(host) = parts.next() {
                 Host::parse(host).map_err(|e| PaperClipError::InvalidHost(h.into(), e))?;
-                u.set_host(Some(&host))
-                    .expect("expected valid host in URL?");
+                u.set_host(Some(host)).expect("expected valid host in URL?");
             }
 
             if let Some(port) = parts.next() {
                 let p = port.parse::<u16>().map_err(|_| {
-                    PaperClipError::InvalidHost(h.into(), url::ParseError::InvalidPort)
+                    PaperClipError::InvalidHost(h.into(), url_dep::ParseError::InvalidPort)
                 })?;
                 u.set_port(Some(p)).expect("expected valid port in URL?");
             }
@@ -301,7 +295,7 @@ pub trait Emitter: Sized {
         // Generate file contents by accumulating definitions.
         for (name, schema) in &api.definitions {
             debug!("Creating definition {}", name);
-            let schema = schema.read();
+            let schema = schema.read().unwrap();
             gen.generate_from_definition(&schema)?;
         }
 
@@ -329,10 +323,10 @@ pub trait Emitter: Sized {
     /// and defines/reuses types based on the given context.
     ///
     /// **NOTE:** Not meant to be overridden.
-    fn build_def<'a>(
+    fn build_def(
         &self,
         def: &Self::Definition,
-        ctx: DefinitionContext<'a>,
+        ctx: DefinitionContext<'_>,
     ) -> Result<EmittedUnit, Error> {
         if let Some(u) = CodegenEmitter(self).try_emit_enum(def, ctx.clone())? {
             return Ok(u);
@@ -374,7 +368,7 @@ impl<'a, E> Deref for CodegenEmitter<'a, E> {
     type Target = E;
 
     fn deref(&self) -> &E {
-        &self.0
+        self.0
     }
 }
 
@@ -411,7 +405,7 @@ where
             .parent()
             .ok_or_else(|| PaperClipError::InvalidDefinitionPath(mod_path.clone()))?;
         if !dir_path.exists() {
-            fs::create_dir_all(&dir_path)?;
+            fs::create_dir_all(dir_path)?;
         }
 
         // Get the path without the extension.
@@ -450,10 +444,10 @@ where
 
     /// Assumes that the given definition is an array and returns the corresponding
     /// vector type for it.
-    fn emit_array<'c>(
+    fn emit_array(
         &self,
         def: &E::Definition,
-        ctx: DefinitionContext<'c>,
+        ctx: DefinitionContext<'_>,
     ) -> Result<EmittedUnit, Error> {
         let it = def
             .items()
@@ -464,7 +458,7 @@ where
             ctx = ctx.add_parent(n);
         }
 
-        let schema = it.read();
+        let schema = it.read().unwrap();
         if schema.name().is_none() {
             // If the schema doesn't have a name, then add "item" as a suffix
             // so that it can be used for name generation later.
@@ -513,10 +507,10 @@ where
 
         let name = self.def_name(def).or_else(|e| {
             // anonymous object
-            self.def_anon_name(def, &ctx.parents).ok_or_else(|| e)
+            self.def_anon_name(def, &ctx.parents).ok_or(e)
         })?;
 
-        let mut obj = ApiObject::with_name(&name);
+        let mut obj = ApiObject::with_name(name);
         obj.description = def.description().map(String::from);
         obj.inner = ObjectContainer::Enum {
             variants: vec![],
@@ -538,10 +532,10 @@ where
 
     /// Assumes that the given definition is an object and returns the corresponding
     /// Rust struct / map.
-    fn emit_object<'c>(
+    fn emit_object(
         &self,
         def: &E::Definition,
-        ctx: DefinitionContext<'c>,
+        ctx: DefinitionContext<'_>,
     ) -> Result<EmittedUnit, Error> {
         match self.try_emit_map(def, &ctx)? {
             EmittedUnit::None => (),
@@ -567,7 +561,7 @@ where
 
         match def.additional_properties() {
             Some(Either::Right(s)) => {
-                let schema = s.read();
+                let schema = s.read().unwrap();
                 let ty = self
                     .build_def(&schema, ctx.clone().define(false))?
                     .known_type();
@@ -578,10 +572,10 @@ where
         }
     }
 
-    fn emit_known_object_path<'c>(
+    fn emit_known_object_path(
         &self,
         def: &E::Definition,
-        ctx: DefinitionContext<'c>,
+        ctx: DefinitionContext<'_>,
     ) -> Result<EmittedUnit, Error> {
         // Use absolute paths to save some pain.
         let mut ty_path = String::from(self.state().mod_prefix.trim_matches(':'));
@@ -597,8 +591,8 @@ where
             // be in its own module, which is identified by the initial parent name.
             if let Some(name) = self.def_anon_name(def, &ctx.parents) {
                 ty_path.push_str("::");
-                let parent = ctx.parents.get(0).expect("expected first parent name");
-                ty_path.push_str(&parent.to_snek_case());
+                let parent = ctx.parents.first().expect("expected first parent name");
+                ty_path.push_str(&parent.to_snake_case());
                 ty_path.push_str("::");
                 ty_path.push_str(&name);
                 return Ok(EmittedUnit::KnownButAnonymous(ty_path, objects));
@@ -611,7 +605,7 @@ where
             if iter.peek().is_none() {
                 ty_path.push_str(&c);
                 ty_path.push_str("::");
-                c = c.to_camel_case();
+                c = c.to_pascal_case();
             }
 
             ty_path.push_str(&c);
@@ -629,7 +623,7 @@ where
     ) -> Result<EmittedUnit, Error> {
         let name = self.def_name(def).or_else(|e| {
             // anonymous object
-            self.def_anon_name(def, &ctx.parents).ok_or_else(|| e)
+            self.def_anon_name(def, &ctx.parents).ok_or(e)
         })?;
         let mut obj = ApiObject::with_name(&name);
         obj.description = def.description().map(String::from);
@@ -649,7 +643,7 @@ where
             props
                 .iter()
                 .try_for_each(|(name, prop)| -> Result<(), Error> {
-                    let schema = prop.read();
+                    let schema = prop.read().unwrap();
                     let ctx = ctx.clone().define(false).add_parent(name);
                     let ty = self.build_def(&schema, ctx)?;
                     let ty_path = ty.known_type();
@@ -696,18 +690,19 @@ where
     /// Returns the requirements of the "deepest" child type in the given definition.
     ///
     /// See `ObjectField.children_req` field for what it means.
+    #[allow(clippy::only_used_in_recursion)]
     fn children_requirements(&self, schema: &E::Definition) -> Vec<String> {
         match schema.data_type() {
             Some(DataType::Object) => {
                 if let Some(Either::Right(s)) = schema.additional_properties() {
-                    return self.children_requirements(&s.read());
+                    return self.children_requirements(&s.read().unwrap());
                 } else if let Some(s) = schema.required_properties() {
                     return s.iter().cloned().collect();
                 }
             }
             Some(DataType::Array) => {
                 if let Some(s) = schema.items() {
-                    return self.children_requirements(&s.read());
+                    return self.children_requirements(&s.read().unwrap());
                 }
             }
             _ => (),
@@ -805,30 +800,23 @@ where
         // If we have unused params which don't exist in the method-specific
         // params (which take higher precedence), then we can copy those inside.
         for global_param in unused_params {
-            if params
-                .iter()
-                .find(|p| p.name == global_param.name)
-                .is_none()
-            {
+            if !params.iter().any(|p| p.name == global_param.name) {
                 params.push(global_param.clone());
             }
         }
 
-        params = params
-            .into_iter()
-            .filter(|p| {
-                let skip = p.presence == ParameterIn::FormData && schema_path.is_some();
-                if skip {
-                    warn!(
-                        "Skipping form data parameter {:?} in path {:?} because \
+        params.retain(|p| {
+            let skip = p.presence == ParameterIn::FormData && schema_path.is_some();
+            if skip {
+                warn!(
+                    "Skipping form data parameter {:?} in path {:?} because \
                          the operation already has a body.",
-                        p.name, self.path
-                    );
-                }
+                    p.name, self.path
+                );
+            }
 
-                !skip
-            })
-            .collect();
+            !skip
+        });
 
         // If there's a matching object, add the params to its operation.
         if let Some(pat) = schema_path.as_ref() {
@@ -847,7 +835,7 @@ where
     ) -> Vec<Parameter> {
         let mut map = HeaderMap::<Parameter>::with_capacity(2);
         for resp in responses.values() {
-            let r = resp.read();
+            let r = resp.read().unwrap();
             for (name, info) in &r.headers {
                 let name = match HeaderName::from_bytes(name.as_bytes()) {
                     Ok(n) => n,
@@ -905,12 +893,12 @@ where
         let mut schema_path = None;
         let mut params = vec![];
         for param in obj_params {
-            let p = param.read();
+            let p = param.read().unwrap();
             p.check(self.path)?; // validate the parameter
 
             if let Some(def) = p.schema.as_ref() {
                 // If a schema exists, then get its path for later use.
-                let pat = self.emitter.def_mod_path(&*def.read())?;
+                let pat = self.emitter.def_mod_path(&def.read().unwrap())?;
                 if def_mods.get(&pat).is_some() {
                     schema_path = Some(pat);
                     continue;
@@ -988,8 +976,8 @@ where
             .or_insert_with(Default::default);
 
         let mut response_contains_any = false;
-        let response_ty_path = if let Some(s) = Self::get_2xx_response_schema(&op) {
-            let schema = &*s.read();
+        let response_ty_path = if let Some(s) = Self::get_2xx_response_schema(op) {
+            let schema = &*s.read().unwrap();
             response_contains_any = schema.contains_any();
             Some(
                 self.emitter
@@ -1031,7 +1019,7 @@ where
         params: Vec<Parameter>,
     ) -> Result<(), Error> {
         // Let's try from the response maybe...
-        let s = match Self::get_2xx_response_schema(&op) {
+        let s = match Self::get_2xx_response_schema(op) {
             Some(s) => s,
             None => {
                 warn!(
@@ -1042,9 +1030,10 @@ where
             }
         };
 
-        let schema = &*s.read();
+        let schema = &*s.read().unwrap();
         let state = self.emitter.state();
-        let listable = schema.items().and_then(|s| s.read().data_type()) == Some(DataType::Object);
+        let listable =
+            schema.items().and_then(|s| s.read().unwrap().data_type()) == Some(DataType::Object);
 
         let mut unknown_schema_context = None;
         let s = match schema.data_type() {
@@ -1076,7 +1065,7 @@ where
             }
         };
 
-        let schema = &*s.read();
+        let schema = &*s.read().unwrap();
         let mut def_mods = state.def_mods.borrow_mut();
         let (obj, response_ty_path) = match unknown_schema_context {
             Some((p, ty)) => (
@@ -1138,8 +1127,8 @@ where
             .iter()
             .filter(|(c, _)| c.starts_with('2')) // 2xx response
             .filter_map(|(_, r)| {
-                let resp = r.read();
-                resp.schema.as_ref().map(|r| (&**r).clone())
+                let resp = r.read().unwrap();
+                resp.schema.as_ref().map(|r| (**r).clone())
             })
             .next()
     }

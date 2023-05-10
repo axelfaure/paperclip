@@ -1,36 +1,39 @@
-# Host OpenAPI v2 spec through actix-web
+# Host OpenAPI spec through actix-web
 
-With `actix` feature enabled, paperclip exports an **experimental** plugin for [actix-web](https://github.com/actix/actix-web) framework to host OpenAPI v2 spec for your APIs *automatically*. While it's not feature complete, you can rely on it to not break your actix-web flow.
+With `actix4` feature enabled, paperclip exports a plugin for [actix-web](https://github.com/actix/actix-web) framework to host OpenAPI v2 spec for your APIs *automatically*. While it's not feature complete, you can rely on it to not break your actix-web flow.
 
-Let's start with a simple actix-web application. It has `actix-web` and `serde` for JSON'ifying your APIs. Let's also add `paperclip` with `actix` feature.
+Let's start with a simple actix-web application. It has `actix-web` and `serde` for JSON'ifying your APIs. Let's also add `paperclip` with `actix4` feature.
 
 ```toml
 # [package] ignored for brevity
 
 [dependencies]
 # actix-web 2.0 is supported through "actix2" and "actix2-nightly" features
-actix-web = "3.0"
-# The "actix-nightly" feature can be specified if you're using nightly compiler. Even though
+# actix-web 3.0 is supported through "actix3" and "actix3-nightly" features
+actix-web = "4.0"
+# The "actix4-nightly" feature can be specified if you're using nightly compiler. Even though
 # this plugin works smoothly with the nightly compiler, it also works in stable
-# channel (replace "actix-nightly" feature with "actix" in that case). There maybe compilation errors,
+# channel (replace "actix4-nightly" feature with "actix4" in that case). There maybe compilation errors,
 # but those can be fixed.
-paperclip = { version = "0.4", features = ["actix-nightly"] }
-serde = "1.0"
+# Add the "v3" option if you want to expose an OpenAPI v3 document
+paperclip = { version = "0.8", features = ["actix4"] }
+serde = { version = "1.0", features = ["derive"] }
 ```
 
 Our `main.rs` looks like this:
 
 ```rust
-use actix_web::{App, HttpServer, web::{self, Json}};
+use actix_web::{App, HttpServer, Error, web::{self, Json}};
 use serde::{Serialize, Deserialize};
 
+// Mark containers (body, query, parameter, etc.) like so...
 #[derive(Serialize, Deserialize)]
 struct Pet {
     name: String,
     id: Option<i64>,
 }
 
-async fn echo_pet(body: Json<Pet>) -> Result<Json<Pet>, ()> {
+async fn echo_pet(body: Json<Pet>) -> Result<Json<Pet>, Error> {
     Ok(body)
 }
 
@@ -49,10 +52,12 @@ async fn main() -> std::io::Result<()> {
 Now, let's modify it to use the plugin!
 
 ```rust
-use actix_web::{App, HttpServer};
+use actix_web::{App, HttpServer, Error};
 use paperclip::actix::{
     // extension trait for actix_web::App and proc-macro attributes
     OpenApiExt, Apiv2Schema, api_v2_operation,
+    // If you prefer the macro syntax for defining routes, import the paperclip macros
+    // get, post, put, delete
     // use this instead of actix_web::web
     web::{self, Json},
 };
@@ -61,13 +66,17 @@ use serde::{Serialize, Deserialize};
 // Mark containers (body, query, parameter, etc.) like so...
 #[derive(Serialize, Deserialize, Apiv2Schema)]
 struct Pet {
+    // You can optionaly add description for an individual property with the following line
+    /// Name of the pet
     name: String,
     id: Option<i64>,
 }
 
 // Mark operations like so...
 #[api_v2_operation]
-async fn echo_pet(body: Json<Pet>) -> Result<Json<Pet>, ()> {
+// Add the next line if you want to use the macro syntax
+// #[post("/pets")]
+async fn echo_pet(body: Json<Pet>) -> Result<Json<Pet>, Error> {
     Ok(body)
 }
 
@@ -81,14 +90,20 @@ async fn main() -> std::io::Result<()> {
             web::resource("/pets")
                 .route(web::post().to(echo_pet))
         )
-        // Mount the JSON spec at this path.
-        .with_json_spec_at("/api/spec")
+        // Or just .service(echo_pet) if you're using the macro syntax
+        // Mount the v2/Swagger JSON spec at this path.
+        .with_json_spec_at("/api/spec/v2")
+        // If you added the "v3" feature, you can also include
+        // .with_json_spec_v3_at("/api/spec/v3")
 
         // ... or if you wish to build the spec by yourself...
 
         // .with_raw_json_spec(|app, spec| {
         //     app.route("/api/spec", web::get().to(move || {
-        //         actix_web::HttpResponse::Ok().json(&spec)
+        //         let spec = spec.clone();
+        //         async move {
+        //             paperclip::actix::HttpResponseWrapper(actix_web::HttpResponse::Ok().json(&spec))
+        //         }
         //     }))
         // })
 
@@ -105,27 +120,27 @@ We have:
  - Switched from `actix_web::web` to `paperclip::actix::web`.
  - Marked our `Pet` struct and `add_pet` function as OpenAPI-compatible schema and operation using proc macro attributes.
  - Transformed our `actix_web::App` to a wrapper using `.wrap_api()`.
- - Mounted the JSON spec at a relative path using `.with_json_spec_at("/api/spec")`.
+ - Optionally switched to Paperclip's macros instead of the actix-web route macros
+ - Mounted the JSON spec at a relative path using `.with_json_spec_at("/api/spec/v2")` (and optionally a v3 spec as well).
  - Built (using `.build()`) and passed the original `App` back to actix-web.
 
 Note that we never touched the service, resources, routes or anything else! This means that our original actix-web flow is unchanged.
 
 Now you can check the API with the following **cURL** command:
 
-```
+```sh
 curl -X POST http://localhost:8080/pets -H "Content-Type: application/json" -d '{"id":1,"name":"Felix"}'
 ```
 
 And see the specs with this:
 
-```
-curl http://localhost:8080/api/spec
+```sh
+curl http://localhost:8080/api/spec/v2
 ```
 
 ... we get the swagger spec as a JSON!
 
-```js
-// NOTE: Formatted for clarity
+```json
 {
   "swagger": "2.0",
   "definitions": {
@@ -153,16 +168,16 @@ curl http://localhost:8080/api/spec
               "$ref": "#/definitions/Pet"
             }
           }
-        }
-      },
-      "parameters": [{
-        "in": "body",
-        "name": "body",
-        "required": true,
-        "schema": {
-          "$ref": "#/definitions/Pet"
-        }
-      }]
+        },
+        "parameters": [{
+          "in": "body",
+          "name": "body",
+          "required": true,
+          "schema": {
+            "$ref": "#/definitions/Pet"
+          }
+        }]
+      }
     }
   },
   "info": {
@@ -174,6 +189,8 @@ curl http://localhost:8080/api/spec
 
 Similarly, if we were to use other extractors like `web::Query<T>`, `web::Form<T>` or `web::Path`, the plugin will emit the corresponding specification as expected.
 
+Description for an individual property uses Rust [doc comments](https://doc.rust-lang.org/reference/comments.html) technology.
+
 #### Known limitations
 
 - **Enums:** OpenAPI (v2) itself supports using simple enums (i.e., with unit variants), but Rust and serde has support for variants with fields and tuples. I still haven't looked deep enough either to say whether this can/cannot be done in OpenAPI or find an elegant way to represent this in OpenAPI.
@@ -183,10 +200,9 @@ Similarly, if we were to use other extractors like `web::Query<T>`, `web::Form<T
 
 At the time of this writing, this plugin didn't support a few OpenAPI v2 features:
 
-Affected entity | Missing feature(s)
---------------- | ---------------
-[Parameter](https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#parameter-object) | Non-body parameters allowing validations like `allowEmptyValue`, `collectionFormat`, `items`, etc.
-[Parameter](https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#parameter-object) | Headers as parameters.
+| Affected entity                                                                                        | Missing feature(s)                                                                                 |
+|--------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
+| [Parameter](https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#parameter-object) | Non-body parameters allowing validations like `allowEmptyValue`, `collectionFormat`, `items`, etc. |
 
 #### Performance implications?
 

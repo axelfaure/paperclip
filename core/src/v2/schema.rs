@@ -100,18 +100,18 @@ fn _schema_contains_any<'a, S: Schema>(schema: &'a S, mut nodes: Vec<&'a str>) -
         .properties()
         .map(|t| {
             t.values()
-                .any(|s| _schema_contains_any(&*s.read(), nodes.clone()))
+                .any(|s| _schema_contains_any(&*s.read().unwrap(), nodes.clone()))
         })
         .unwrap_or(false)
         || schema
             .items()
-            .map(|s| _schema_contains_any(&*s.read(), nodes.clone()))
+            .map(|s| _schema_contains_any(&*s.read().unwrap(), nodes.clone()))
             .unwrap_or(false)
         || schema
             .additional_properties()
             .map(|e| match e {
                 Either::Left(extra_props_allowed) => *extra_props_allowed,
-                Either::Right(s) => _schema_contains_any(&*s.read(), nodes),
+                Either::Right(s) => _schema_contains_any(&*s.read().unwrap(), nodes),
             })
             .unwrap_or(false)
 }
@@ -194,6 +194,8 @@ impl_type_simple!(
 );
 #[cfg(feature = "actix-session")]
 impl_type_simple!(actix_session::Session);
+#[cfg(feature = "actix-identity")]
+impl_type_simple!(actix_identity::Identity);
 #[cfg(feature = "actix-files")]
 impl_type_simple!(
     actix_files::NamedFile,
@@ -217,8 +219,13 @@ impl_type_simple!(
     DataTypeFormat::Float
 );
 
-#[cfg(feature = "uuid")]
-impl_type_simple!(uuid::Uuid, DataType::String, DataTypeFormat::Uuid);
+#[cfg(feature = "url")]
+impl_type_simple!(url::Url, DataType::String, DataTypeFormat::Url);
+
+#[cfg(feature = "uuid0")]
+impl_type_simple!(uuid0_dep::Uuid, DataType::String, DataTypeFormat::Uuid);
+#[cfg(feature = "uuid1")]
+impl_type_simple!(uuid1_dep::Uuid, DataType::String, DataTypeFormat::Uuid);
 
 #[cfg(feature = "chrono")]
 impl<T: chrono::offset::TimeZone> TypedData for chrono::DateTime<T> {
@@ -231,6 +238,7 @@ impl<T: chrono::offset::TimeZone> TypedData for chrono::DateTime<T> {
 }
 
 #[cfg(feature = "chrono")]
+#[allow(deprecated)]
 impl<T: chrono::offset::TimeZone> TypedData for chrono::Date<T> {
     fn data_type() -> DataType {
         DataType::String
@@ -240,24 +248,36 @@ impl<T: chrono::offset::TimeZone> TypedData for chrono::Date<T> {
     }
 }
 
+impl_type_simple!(std::net::IpAddr, DataType::String, DataTypeFormat::Ip);
+impl_type_simple!(std::net::Ipv4Addr, DataType::String, DataTypeFormat::IpV4);
+impl_type_simple!(std::net::Ipv6Addr, DataType::String, DataTypeFormat::IpV6);
+
 /// Represents a OpenAPI v2 schema object convertible. This is auto-implemented by
 /// framework-specific macros:
 ///
-/// - [`Apiv2Schema`](https://paperclip.waffles.space/paperclip_actix/derive.Apiv2Schema.html)
+/// - [`Apiv2Schema`](https://paperclip-rs.github.io/paperclip/paperclip_actix/derive.Apiv2Schema.html)
 /// for schema objects.
-/// - [`Apiv2Security`](https://paperclip.waffles.space/paperclip_actix/derive.Apiv2Security.html)
+/// - [`Apiv2Security`](https://paperclip-rs.github.io/paperclip/paperclip_actix/derive.Apiv2Security.html)
 /// for security scheme objects.
+/// - [`Apiv2Header`](https://paperclip-rs.github.io/paperclip/paperclip_actix/derive.Apiv2Header.html)
+/// for header parameters objects.
 ///
 /// This is implemented for primitive types by default.
 pub trait Apiv2Schema {
     /// Name of this schema. This is the name to which the definition of the object is mapped.
-    const NAME: Option<&'static str> = None;
+    fn name() -> Option<String> {
+        None
+    }
 
     /// Description of this schema. In case the trait is derived, uses the documentation on the type.
-    const DESCRIPTION: &'static str = "";
+    fn description() -> &'static str {
+        ""
+    }
 
     /// Indicates the requirement of this schema.
-    const REQUIRED: bool = true;
+    fn required() -> bool {
+        true
+    }
 
     /// Returns the raw schema for this object.
     fn raw_schema() -> DefaultSchemaRaw {
@@ -279,13 +299,15 @@ pub trait Apiv2Schema {
     /// so it won't affect the incoming requests at all.
     fn schema_with_ref() -> DefaultSchemaRaw {
         let mut def = Self::raw_schema();
-        if let Some(n) = Self::NAME {
-            def.reference = Some(String::from("#/definitions/") + n);
+        if let Some(n) = Self::name() {
+            def.reference =
+                Some(String::from("#/definitions/") + &n.replace('<', "%3C").replace('>', "%3E"));
         } else if let Some(n) = def.name.as_ref() {
-            def.reference = Some(String::from("#/definitions/") + n);
+            def.reference =
+                Some(String::from("#/definitions/") + &n.replace('<', "%3C").replace('>', "%3E"));
         }
-        if !Self::DESCRIPTION.is_empty() {
-            def.description = Some(Self::DESCRIPTION.to_owned());
+        if !Self::description().is_empty() {
+            def.description = Some(Self::description().to_owned());
         }
 
         def
@@ -294,6 +316,10 @@ pub trait Apiv2Schema {
     /// Returns the security scheme for this object.
     fn security_scheme() -> Option<SecurityScheme> {
         None
+    }
+
+    fn header_parameter_schema() -> Vec<Parameter<DefaultSchemaRaw>> {
+        vec![]
     }
 }
 
@@ -313,8 +339,13 @@ impl<T: TypedData> Apiv2Schema for T {
 
 #[cfg(feature = "nightly")]
 impl<T> Apiv2Schema for Option<T> {
-    default const NAME: Option<&'static str> = None;
-    default const REQUIRED: bool = false;
+    default fn name() -> Option<String> {
+        None
+    }
+
+    default fn required() -> bool {
+        false
+    }
 
     default fn raw_schema() -> DefaultSchemaRaw {
         Default::default()
@@ -323,11 +354,20 @@ impl<T> Apiv2Schema for Option<T> {
     default fn security_scheme() -> Option<SecurityScheme> {
         None
     }
+
+    default fn header_parameter_schema() -> Vec<Parameter<DefaultSchemaRaw>> {
+        vec![]
+    }
 }
 
 impl<T: Apiv2Schema> Apiv2Schema for Option<T> {
-    const NAME: Option<&'static str> = T::NAME;
-    const REQUIRED: bool = false;
+    fn name() -> Option<String> {
+        T::name()
+    }
+
+    fn required() -> bool {
+        false
+    }
 
     fn raw_schema() -> DefaultSchemaRaw {
         T::raw_schema()
@@ -336,11 +376,17 @@ impl<T: Apiv2Schema> Apiv2Schema for Option<T> {
     fn security_scheme() -> Option<SecurityScheme> {
         T::security_scheme()
     }
+
+    fn header_parameter_schema() -> Vec<Parameter<DefaultSchemaRaw>> {
+        T::header_parameter_schema()
+    }
 }
 
 #[cfg(feature = "nightly")]
 impl<T, E> Apiv2Schema for Result<T, E> {
-    default const NAME: Option<&'static str> = None;
+    default fn name() -> Option<String> {
+        None
+    }
 
     default fn raw_schema() -> DefaultSchemaRaw {
         Default::default()
@@ -349,10 +395,16 @@ impl<T, E> Apiv2Schema for Result<T, E> {
     default fn security_scheme() -> Option<SecurityScheme> {
         Default::default()
     }
+
+    default fn header_parameter_schema() -> Vec<Parameter<DefaultSchemaRaw>> {
+        Default::default()
+    }
 }
 
 impl<T: Apiv2Schema, E> Apiv2Schema for Result<T, E> {
-    const NAME: Option<&'static str> = T::NAME;
+    fn name() -> Option<String> {
+        T::name()
+    }
 
     fn raw_schema() -> DefaultSchemaRaw {
         T::raw_schema()
@@ -360,11 +412,17 @@ impl<T: Apiv2Schema, E> Apiv2Schema for Result<T, E> {
 
     fn security_scheme() -> Option<SecurityScheme> {
         T::security_scheme()
+    }
+
+    fn header_parameter_schema() -> Vec<Parameter<DefaultSchemaRaw>> {
+        T::header_parameter_schema()
     }
 }
 
 impl<T: Apiv2Schema + Clone> Apiv2Schema for std::borrow::Cow<'_, T> {
-    const NAME: Option<&'static str> = T::NAME;
+    fn name() -> Option<String> {
+        T::name()
+    }
 
     fn raw_schema() -> DefaultSchemaRaw {
         T::raw_schema()
@@ -372,6 +430,10 @@ impl<T: Apiv2Schema + Clone> Apiv2Schema for std::borrow::Cow<'_, T> {
 
     fn security_scheme() -> Option<SecurityScheme> {
         T::security_scheme()
+    }
+
+    fn header_parameter_schema() -> Vec<Parameter<DefaultSchemaRaw>> {
+        T::header_parameter_schema()
     }
 }
 
@@ -409,6 +471,7 @@ macro_rules! impl_schema_map {
     };
 }
 
+use crate::v2::models::Parameter;
 use std::collections::*;
 
 impl_schema_array!(Vec<T>);
@@ -457,7 +520,7 @@ impl_schema_map!(BTreeMap<K, V>);
 /// Represents a OpenAPI v2 operation convertible. This is auto-implemented by
 /// framework-specific macros:
 ///
-/// - [`paperclip_actix::api_v2_operation`](https://paperclip.waffles.space/paperclip_actix/attr.api_v2_operation.html).
+/// - [`paperclip_actix::api_v2_operation`](https://paperclip-rs.github.io/paperclip/paperclip_actix/attr.api_v2_operation.html).
 ///
 /// **NOTE:** The type parameters specified here aren't used by the trait itself,
 /// but *can* be used for constraining stuff in framework-related impls.
@@ -470,14 +533,20 @@ pub trait Apiv2Operation {
 
     /// Returns the definitions used by this operation.
     fn definitions() -> BTreeMap<String, DefaultSchemaRaw>;
+
+    fn is_visible() -> bool {
+        true
+    }
 }
 
 /// Represents a OpenAPI v2 error convertible. This is auto-implemented by
 /// framework-specific macros:
 ///
-/// - [`paperclip_actix::api_v2_errors`](https://paperclip.waffles.space/paperclip_actix/attr.api_v2_errors.html).
+/// - [`paperclip_actix::api_v2_errors`](https://paperclip-rs.github.io/paperclip/paperclip_actix/attr.api_v2_errors.html).
 pub trait Apiv2Errors {
     const ERROR_MAP: &'static [(u16, &'static str)] = &[];
+    fn update_error_definitions(_op: &mut DefaultOperationRaw) {}
+    fn update_definitions(_map: &mut BTreeMap<String, DefaultSchemaRaw>) {}
 }
 
 impl Apiv2Errors for () {}

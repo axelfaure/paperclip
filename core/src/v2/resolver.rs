@@ -6,7 +6,7 @@ use super::{
     Schema,
 };
 use crate::error::ValidationError;
-use heck::CamelCase;
+use heck::ToPascalCase;
 
 use std::{cell::RefCell, collections::BTreeMap, mem};
 
@@ -73,7 +73,7 @@ where
         // Resolve path operations first. We may encounter anonymous
         // definitions along the way, which we'll insert into `self.defs`
         // and we'll have to resolve them anyway.
-        let mut paths = mem::replace(&mut self.paths, BTreeMap::new());
+        let mut paths = mem::take(&mut self.paths);
         paths.iter_mut().try_for_each(|(path, map)| {
             log::trace!("Checking path: {}", path);
             self.resolve_operations(path, map)
@@ -82,7 +82,7 @@ where
 
         // Set the names of all schemas.
         for (name, schema) in &self.defs {
-            schema.write().set_name(name);
+            schema.write().unwrap().set_name(name);
         }
 
         for (name, schema) in &self.defs {
@@ -92,9 +92,9 @@ where
             for def in self.cyclic_defs.borrow_mut().drain(..) {
                 log::debug!(
                     "Cyclic definition detected: {:?}",
-                    def.read().name().unwrap()
+                    def.read().unwrap().name().unwrap()
                 );
-                def.write().set_cyclic(true);
+                def.write().unwrap().set_cyclic(true);
             }
         }
 
@@ -107,7 +107,7 @@ where
         &self,
         schema: &Resolvable<S>,
     ) -> Result<(), ValidationError> {
-        let mut schema = match schema.try_write() {
+        let mut schema = match schema.try_write().ok() {
             Some(s) => s,
             None => {
                 self.cyclic_defs.borrow_mut().push(schema.clone());
@@ -141,7 +141,7 @@ where
     /// otherwise traverse further.
     fn resolve_definitions(&self, schema: &mut Resolvable<S>) -> Result<(), ValidationError> {
         let ref_def = {
-            let s = match schema.try_read() {
+            let s = match schema.try_read().ok() {
                 Some(s) => s,
                 None => {
                     self.cyclic_defs.borrow_mut().push(schema.clone());
@@ -161,7 +161,7 @@ where
             *schema = match schema {
                 Resolvable::Raw(old) => Resolvable::Resolved {
                     old: old.clone(),
-                    new: (&*new).clone(),
+                    new: (*new).clone(),
                 },
                 _ => unimplemented!("schema already resolved?"),
             };
@@ -190,7 +190,7 @@ where
                     *resp = Either::Right(new);
                 }
 
-                let mut response = resp.write();
+                let mut response = resp.write().unwrap();
                 self.resolve_operation_schema(
                     &mut response.schema,
                     Some(method),
@@ -208,7 +208,7 @@ where
         &mut self,
         method: Option<HttpMethod>,
         path: &str,
-        params: &mut Vec<Either<Reference, ResolvableParameter<S>>>,
+        params: &mut [Either<Reference, ResolvableParameter<S>>],
     ) -> Result<(), ValidationError> {
         for p in params.iter_mut() {
             let ref_param = if let Some(r) = p.left() {
@@ -222,7 +222,7 @@ where
                 *p = Either::Right(new);
             }
 
-            let mut param = p.write();
+            let mut param = p.write().unwrap();
             self.resolve_operation_schema(&mut param.schema, method, path, "Body")?;
         }
 
@@ -243,11 +243,11 @@ where
         };
 
         match schema {
-            Resolvable::Raw(ref s) if s.read().reference().is_none() => {
+            Resolvable::Raw(ref s) if s.read().unwrap().reference().is_none() => {
                 // We've encountered an anonymous schema definition in some
                 // parameter/response. Give it a name and add it to global definitions.
                 let prefix = method.map(|s| s.to_string()).unwrap_or_default();
-                let def_name = (prefix + path + suffix).to_camel_case();
+                let def_name = (prefix + path + suffix).to_pascal_case();
                 let mut ref_schema = S::default();
                 ref_schema.set_reference(format!("{}{}", DEF_REF_PREFIX, def_name));
                 let old_schema = mem::replace(schema, ref_schema.into());
@@ -263,7 +263,7 @@ where
     /// Given a name (from `$ref` field), get a reference to the definition.
     fn resolve_definition_reference(&self, name: &str) -> Result<Resolvable<S>, ValidationError> {
         if !name.starts_with(DEF_REF_PREFIX) {
-            return Err(ValidationError::InvalidRefURI(name.into()));
+            return Err(ValidationError::InvalidRefUri(name.into()));
         }
 
         let name = &name[DEF_REF_PREFIX.len()..];
@@ -280,7 +280,7 @@ where
         name: &str,
     ) -> Result<ResolvableParameter<S>, ValidationError> {
         if !name.starts_with(PARAM_REF_PREFIX) {
-            return Err(ValidationError::InvalidRefURI(name.into()));
+            return Err(ValidationError::InvalidRefUri(name.into()));
         }
 
         let name = &name[PARAM_REF_PREFIX.len()..];
@@ -297,7 +297,7 @@ where
         name: &str,
     ) -> Result<ResolvableResponse<S>, ValidationError> {
         if !name.starts_with(RESP_REF_PREFIX) {
-            return Err(ValidationError::InvalidRefURI(name.into()));
+            return Err(ValidationError::InvalidRefUri(name.into()));
         }
 
         let name = &name[RESP_REF_PREFIX.len()..];

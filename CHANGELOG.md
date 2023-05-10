@@ -4,12 +4,77 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0] - 2023-01-14 :warning: Breaking Changes
 ### Added
-- Add support for actix-web-macros methods routing [PR#289](https://github.com/wafflespeanut/paperclip/pull/289)
-- Actix plugin: add an empty impl for actix-web `ReqData<T>`
+- Support non-boxed bodies in scope middleware. [PR#457](https://github.com/paperclip-rs/paperclip/pull/457)
+- Add `uuid0` and `uuid1` features. [PR#461](https://github.com/paperclip-rs/paperclip/pull/461)
+- Add Content-Type Header to Swagger-UI Requests. [PR#467](https://github.com/paperclip-rs/paperclip/pull/467)
 
 ### Changed
+- Updated copyrights to use "Paperclip Contributors". [PR#470](https://github.com/paperclip-rs/paperclip/pull/470)
+- Switch from `parking_lot` to `std::sync`. [PR#473](https://github.com/paperclip-rs/paperclip/pull/473)
+- Replaced dependency `pin-project` with `pin-project-lite`. [PR#472](https://github.com/paperclip-rs/paperclip/pull/472)
+
+### Fixed
+- Ensures that each chunk is written fully (code-gen). [PR#491](https://github.com/paperclip-rs/paperclip/pull/491)
+- Strip template pattern from paths. [PR#486](https://github.com/paperclip-rs/paperclip/pull/486)
+- Inconsistent behavior between `rapidoc` and `swagger_ui` (extra slash). [PR#460](https://github.com/paperclip-rs/paperclip/pull/460)
+- Fixed header-based `SecuritySchema` conversion for `OpenAPI v3`. [PR#458](https://github.com/paperclip-rs/paperclip/pull/458)
+- Respect host setting of v2 spec when converting to v3. [PR#463](https://github.com/paperclip-rs/paperclip/pull/463)
+- Move root level extensions to root. [PR#464](https://github.com/paperclip-rs/paperclip/pull/464)
+- `Apiv2Header` link in documentation. [PR#468](https://github.com/paperclip-rs/paperclip/pull/468)
+
+## [0.7.1] - 2022-07-27
+### Added
+- Add support for `PATCH` methods. [PR#422](https://github.com/paperclip-rs/paperclip/pull/422)
+- Add support for header parameters through the newly introduced `Apiv2Header` derive macro. [PR#413](https://github.com/paperclip-rs/paperclip/pull/413)
+- Add support for [RapiDoc UI](https://mrin9.github.io/RapiDoc/index.html). [PR#420](https://github.com/paperclip-rs/paperclip/pull/420)
+- Add example support for derived `Apiv2Schema`. [PR#421](https://github.com/paperclip-rs/paperclip/pull/421)
+- Add ability to not generate documentation for some operations through the skip attribute on api_v2_schema macro. [PR#423](https://github.com/paperclip-rs/paperclip/pull/423)
+- Add support for deprecated operations. [PR#424](https://github.com/paperclip-rs/paperclip/pull/424)
+
+### Fixed
+- Fix missing slash between url parts [PR#416](https://github.com/paperclip-rs/paperclip/pull/416)
+- Properly support non-BoxBody response payload types [PR#414](https://github.com/paperclip-rs/paperclip/pull/414)
+- Fix required fields definition when using serde flatten [PR#412](https://github.com/paperclip-rs/paperclip/pull/412)
+- Fix reference urls not being RFC3986-compliant [PR#411](https://github.com/paperclip-rs/paperclip/pull/411)
+
+## [0.7.0] - 2022-04-03
+### Added
+- Add openapi component rename attribute [PR#367](https://github.com/paperclip-rs/paperclip/pull/367)
+- Allow automatically adding the module path to the openapi component name, via a feature "path-in-definition" [PR#373](https://github.com/paperclip-rs/paperclip/pull/373)
+- Add missing ip, ipv4 and ipv6 string format types
+- Add support for actix-web 4
+  - Middleware support does not support non-`BoxBody` response payload types. 
+    As a workaround you can use `actix-web::middlware::Compat`.
+- Add support for Schemas wrapping Generic types (e.g. `DataResponse<T>` where `T` also derives
+`Apiv2Schema`) [PR#332](https://github.com/paperclip-rs/paperclip/pull/332)
+- Add support for actix-web validator [PR#403](https://github.com/paperclip-rs/paperclip/pull/403)
+
+### Fixed
+- Add more tuple sizes for web::Path for OperationModifier impl [PR#379](https://github.com/paperclip-rs/paperclip/pull/379)
+- Add missing extensions to openapi v2 Info
+- Schemas that enclose Generics are no longer conflicting/overwritten
+
+## [0.6.1] - 2021-10-15
+### Fixed
+- Actix2 plugin: fix compilation error `ReqData` not found
+
+## [0.6.0] - 2021-10-13
+### Added
+- Add support for actix-web-macros methods routing [PR#289](https://github.com/paperclip-rs/paperclip/pull/289)
+- Actix plugin: add an empty impl for actix-web `ReqData<T>`
+- Add support for the `#[serde(skip)]` attribute in structs and enums.
+- Expose openapi v3 spec through `with_json_spec_v3_at` and `with_raw_json_spec_v3` - this is done through a conversion from
+ the v2 types to v3 and so all existing code should be valid. It also means that we're not yet exposing any specific
+ v3 features.
+- Added new method `trim_base_path` to trim the api base path from all method paths.
+- `Apiv2Schema` supports `url` [PR#334](https://github.com/paperclip-rs/paperclip/pull/334)
+- Add [swagger-ui](https://swagger.io/tools/swagger-ui/) for visualization/test of API via `with_swagger_ui_at` [PR#331](https://github.com/paperclip-rs/paperclip/pull/331).
+
+### Changed
+- Actix plugin: `#[api_v2_errors]` macro now supports adding different error schemes per response code.
+- Actix plugin: Add new `#[api_v2_errors_overlay]` macro which can be used to filter out unwanted responses from an existing error type.
 
 ### Fixed
 - Optional type aliases like `type Email = Option<String>` will not be added to the `required` fields.
@@ -151,10 +216,10 @@ and `operation_id` in macro.
 - Loading OpenAPI v2 schema from JSON/YAML
 - Workspace, README, LICENSE, Makefile, CI config, etc.
 
-[Unreleased]: https://github.com/wafflespeanut/paperclip/compare/v0.5.0...HEAD
-[0.5.0]: https://github.com/wafflespeanut/paperclip/compare/v0.4.1...v0.5.0
-[0.4.1]: https://github.com/wafflespeanut/paperclip/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/wafflespeanut/paperclip/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/wafflespeanut/paperclip/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/wafflespeanut/paperclip/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/wafflespeanut/paperclip/releases/tag/v0.1.0
+[Unreleased]: https://github.com/paperclip-rs/paperclip/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/paperclip-rs/paperclip/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/paperclip-rs/paperclip/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/paperclip-rs/paperclip/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/paperclip-rs/paperclip/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/paperclip-rs/paperclip/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/paperclip-rs/paperclip/releases/tag/v0.1.0

@@ -26,7 +26,6 @@
 //! [kube-spec]: https://github.com/kubernetes/kubernetes/tree/afd928b8bc81cea385eba4c94558373df7aeae75/api/openapi-spec
 //!
 //! ```rust,no_run
-//! #[macro_use] extern crate paperclip;
 //! #[macro_use] extern crate serde_derive; // NOTE: We're using serde for decoding stuff.
 //!
 //! use paperclip::v2::{self, ResolvableApi};
@@ -44,7 +43,7 @@
 //!     Other,
 //! }
 //!
-//! #[api_v2_schema]
+//! #[paperclip::api_v2_schema]
 //! #[derive(Debug, Deserialize)]
 //! struct K8sSchema {
 //!     #[serde(rename = "x-kubernetes-patch-strategy")]
@@ -66,13 +65,16 @@
 //! and add them to the known map of definitions.
 //!
 //! ```rust,no_run
+//! #[cfg(feature = "codegen")] {
 //! # use paperclip::v2::{self, ResolvableApi, DefaultSchema};
 //! # let api: ResolvableApi<DefaultSchema> = v2::from_reader(&mut std::io::Cursor::new(vec![])).unwrap();
 //!
 //! let resolved = api.resolve().unwrap();
+//! }
 //! ```
 //!
 //! ```rust,no_run
+//! #[cfg(feature = "codegen")] {
 //! # use paperclip::v2::{self, ResolvableApi, DefaultSchema};
 //! # let api: ResolvableApi<DefaultSchema> = v2::from_reader(&mut std::io::Cursor::new(vec![])).unwrap();
 //! use paperclip::v2::{DefaultEmitter, EmitterState, Emitter};
@@ -81,6 +83,7 @@
 //! state.working_dir = "/path/to/my/crate".into();
 //! let emitter = DefaultEmitter::from(state);
 //! emitter.generate(&api).unwrap(); // generate code!
+//! }
 //! ```
 
 #[cfg(feature = "codegen")]
@@ -90,7 +93,7 @@ use crate::error::PaperClipError;
 use paperclip_core::v2::models::SpecFormat;
 use serde::Deserialize;
 
-use std::io::{Read, Seek, SeekFrom};
+use std::io::Read;
 
 #[cfg(feature = "codegen")]
 pub use self::codegen::{DefaultEmitter, Emitter, EmitterState};
@@ -106,14 +109,15 @@ pub use paperclip_core::{
 /// JSON and YAML formats.
 pub fn from_reader<R, S>(mut reader: R) -> Result<ResolvableApi<S>, PaperClipError>
 where
-    R: Read + Seek,
+    R: Read,
     for<'de> S: Deserialize<'de> + Schema,
 {
-    let mut buf = [0; 1];
-    reader.read_exact(&mut buf)?;
-    reader.seek(SeekFrom::Start(0))?;
+    let mut buf = [b' '];
+    while buf[0].is_ascii_whitespace() {
+        reader.read_exact(&mut buf)?;
+    }
+    let reader = buf.as_ref().chain(reader);
 
-    // FIXME: Support whitespaces
     let (mut api, fmt) = if buf[0] == b'{' {
         (
             serde_json::from_reader::<_, ResolvableApi<S>>(reader)?,

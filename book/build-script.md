@@ -25,7 +25,6 @@ lazy_static = "1.4"
 log = "0.4"
 mime = { git = "https://github.com/hyperium/mime" }
 mime_guess = "2.0"
-parking_lot = "0.11"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.8"
@@ -38,7 +37,7 @@ reqwest = { version = "0.10", features = ["stream", "json"] }
 paperclip = { version = "0.5", features = ["v2", "codegen"] }
 ```
 
-- Add `my-spec.yaml` to the project root with contents from [this file](https://raw.githubusercontent.com/wafflespeanut/paperclip/master/tests/pet-v2.yaml).
+- Add `my-spec.yaml` to the project root with contents from [this file](https://raw.githubusercontent.com/paperclip-rs/paperclip/master/tests/pet-v2.yaml).
 
 - Now, add `build.rs` to the project root with the following:
 

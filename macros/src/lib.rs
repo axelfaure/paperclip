@@ -1,4 +1,4 @@
-//! Convenience macros for [paperclip](https://github.com/wafflespeanut/paperclip).
+//! Convenience macros for [paperclip](https://github.com/paperclip-rs/paperclip).
 //!
 //! You shouldn't need to depend on this, because the stuff here is
 //! already exposed by the corresponding crates.
@@ -27,7 +27,7 @@ use syn::{
 
 /// Converts your struct to support deserializing from an OpenAPI v2
 /// [Schema](https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#schemaObject)
-/// object ([example](https://paperclip.waffles.space/paperclip/v2/)). This adds the necessary fields (in addition to your own fields) and implements the
+/// object ([example](https://paperclip-rs.github.io/paperclip/paperclip/v2/)). This adds the necessary fields (in addition to your own fields) and implements the
 /// `Schema` trait for parsing and codegen.
 #[cfg(feature = "v2")]
 #[proc_macro_attribute]
@@ -59,6 +59,14 @@ pub fn api_v2_security(input: TokenStream) -> TokenStream {
     self::actix::emit_v2_security(input)
 }
 
+/// Derive attribute for indicating that a type is an OpenAPI v2 compatible header parameter.
+#[cfg(feature = "actix")]
+#[proc_macro_error]
+#[proc_macro_derive(Apiv2Header, attributes(openapi))]
+pub fn api_v2_header(input: TokenStream) -> TokenStream {
+    self::actix::emit_v2_header(input)
+}
+
 /// Marker attribute for indicating that the marked object can represent non-2xx (error)
 /// status codes with optional descriptions.
 #[cfg(feature = "actix")]
@@ -66,6 +74,15 @@ pub fn api_v2_security(input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn api_v2_errors(attrs: TokenStream, input: TokenStream) -> TokenStream {
     self::actix::emit_v2_errors(attrs, input)
+}
+
+/// Marker attribute for indicating that the marked object can filter error responses from the
+/// the `#[api_v2_errors]` macro.
+#[cfg(feature = "actix")]
+#[proc_macro_error]
+#[proc_macro_attribute]
+pub fn api_v2_errors_overlay(attrs: TokenStream, input: TokenStream) -> TokenStream {
+    self::actix::emit_v2_errors_overlay(attrs, input)
 }
 
 /// Generate an error at the call site and return empty token stream.
@@ -116,4 +133,6 @@ rest_methods! {
     Post,   post,
     Put,    put,
     Delete, delete,
+    Patch,  patch,
+    Head,   head,
 }

@@ -9,17 +9,17 @@ use crate::error::ValidationError;
 use once_cell::sync::Lazy;
 use paperclip_macros::api_v2_schema_struct;
 use regex::{Captures, Regex};
+use serde::ser::{SerializeMap, Serializer};
 
 #[cfg(feature = "actix-base")]
 use actix_web::http::Method;
 
-use parking_lot::RwLock;
 use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Display},
     ops::{Deref, DerefMut},
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 /// Regex that can be used for fetching templated path parameters.
@@ -75,9 +75,59 @@ pub enum DataTypeFormat {
     #[serde(rename = "date-time")]
     DateTime,
     Password,
+    Url,
     Uuid,
+    Ip,
+    IpV4,
+    IpV6,
     #[serde(other)]
     Other,
+}
+
+impl ToString for DataTypeFormat {
+    fn to_string(&self) -> String {
+        match self {
+            DataTypeFormat::Int32 => "int32",
+            DataTypeFormat::Int64 => "int64",
+            DataTypeFormat::Float => "float",
+            DataTypeFormat::Double => "double",
+            DataTypeFormat::Byte => "byte",
+            DataTypeFormat::Binary => "binary",
+            DataTypeFormat::Date => "date",
+            DataTypeFormat::DateTime => "datetime",
+            DataTypeFormat::Password => "password",
+            DataTypeFormat::Url => "url",
+            DataTypeFormat::Uuid => "uuid",
+            DataTypeFormat::Ip => "ip",
+            DataTypeFormat::IpV4 => "ipv4",
+            DataTypeFormat::IpV6 => "ipv6",
+            // would be nice if Other was Other(String)
+            DataTypeFormat::Other => "other",
+        }
+        .to_string()
+    }
+}
+
+impl From<DataTypeFormat> for DataType {
+    fn from(src: DataTypeFormat) -> Self {
+        match src {
+            DataTypeFormat::Int32 => Self::Integer,
+            DataTypeFormat::Int64 => Self::Integer,
+            DataTypeFormat::Float => Self::Number,
+            DataTypeFormat::Double => Self::Number,
+            DataTypeFormat::Byte => Self::String,
+            DataTypeFormat::Binary => Self::String,
+            DataTypeFormat::Date => Self::String,
+            DataTypeFormat::DateTime => Self::String,
+            DataTypeFormat::Password => Self::String,
+            DataTypeFormat::Url => Self::String,
+            DataTypeFormat::Uuid => Self::String,
+            DataTypeFormat::Ip => Self::String,
+            DataTypeFormat::IpV4 => Self::String,
+            DataTypeFormat::IpV6 => Self::String,
+            DataTypeFormat::Other => Self::Object,
+        }
+    }
 }
 
 /// OpenAPI v2 spec which can be traversed and resolved for codegen.
@@ -86,14 +136,45 @@ pub type ResolvableApi<S> = Api<ResolvableParameter<S>, ResolvableResponse<S>, R
 /// OpenAPI v2 spec with defaults.
 pub type DefaultApiRaw = Api<DefaultParameterRaw, DefaultResponseRaw, DefaultSchemaRaw>;
 
+fn strip_templates_from_paths<P: serde::ser::Serialize, R: serde::ser::Serialize, S: Serializer>(
+    tree: &BTreeMap<String, PathItem<P, R>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let len = tree.len();
+    let mut map = serializer.serialize_map(Some(len))?;
+    for (k, v) in tree {
+        let path = strip_pattern_from_template(k);
+        map.serialize_entry(&path, v)?;
+    }
+    map.end()
+}
+
+fn strip_pattern_from_template(path: &str) -> String {
+    let mut clean_path = path.to_string();
+    for cap in PATH_TEMPLATE_REGEX.captures_iter(path) {
+        let name_only = cap[1]
+            .split_once(':')
+            .map(|t| t.0.to_string())
+            .unwrap_or_else(|| cap[1].to_string());
+        if cap[1] != name_only {
+            clean_path = clean_path.replace(
+                format!("{{{}}}", &cap[1]).as_str(),
+                format!("{{{}}}", name_only).as_str(),
+            );
+        }
+    }
+    clean_path
+}
+
 /// OpenAPI v2 (swagger) spec generic over parameter and schema.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#swagger-object
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#swagger-object>
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Api<P, R, S> {
     pub swagger: Version,
     #[serde(default = "BTreeMap::new")]
     pub definitions: BTreeMap<String, S>,
+    #[serde(serialize_with = "strip_templates_from_paths")]
     pub paths: BTreeMap<String, PathItem<P, R>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
@@ -161,6 +242,13 @@ pub struct Api<P, R, S> {
     #[serde(skip)]
     pub spec_format: SpecFormat,
     pub info: Info,
+
+    #[serde(
+        flatten,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "crate::v2::extensions::deserialize_extensions"
+    )]
+    pub extensions: BTreeMap<String, serde_json::Value>,
 }
 
 /// The format used by spec (JSON/YAML).
@@ -182,8 +270,8 @@ impl SpecFormat {
     /// The mime for this format.
     pub fn mime(self) -> &'static MediaRange {
         match self {
-            SpecFormat::Json => &*JSON_MIME,
-            SpecFormat::Yaml => &*YAML_MIME,
+            SpecFormat::Json => &JSON_MIME,
+            SpecFormat::Yaml => &YAML_MIME,
         }
     }
 }
@@ -203,14 +291,14 @@ use crate as paperclip; // hack for proc macro
 
 /// Default schema if your schema doesn't have any custom fields.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#schemaObject
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#schemaObject>
 #[api_v2_schema_struct]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DefaultSchema;
 
 /// Info object.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#infoObject
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#infoObject>
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Info {
     pub version: String,
@@ -221,11 +309,18 @@ pub struct Info {
     pub contact: Option<Contact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<License>,
+    /// Inline extensions to this object.
+    #[serde(
+        flatten,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "crate::v2::extensions::deserialize_extensions"
+    )]
+    pub extensions: BTreeMap<String, serde_json::Value>,
 }
 
 /// Contact object.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#contactObject
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#contactObject>
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Contact {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -238,7 +333,7 @@ pub struct Contact {
 
 /// License object.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#licenseObject
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#licenseObject>
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct License {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -249,7 +344,7 @@ pub struct License {
 
 /// Security Scheme object.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#security-scheme-object
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#security-scheme-object>
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SecurityScheme {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -303,7 +398,7 @@ impl SecurityScheme {
 
 /// Tag object.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#tag-object
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#tag-object>
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Tag {
     pub name: String,
@@ -316,7 +411,7 @@ pub struct Tag {
 
 /// External Documentation object.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#external-documentation-object
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#external-documentation-object>
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ExternalDocs {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -332,7 +427,7 @@ pub type DefaultPathItemRaw = PathItem<DefaultParameterRaw, DefaultResponseRaw>;
 
 /// Path item object.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#pathItemObject
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#pathItemObject>
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PathItem<P, R> {
     #[serde(flatten, default = "BTreeMap::default")]
@@ -379,12 +474,7 @@ impl<S> PathItem<Parameter<S>, Response<S>> {
                     .position(|p| p.name == name.as_str())
                     .expect("collected parameter missing?");
                 let p = op.parameters.swap_remove(idx);
-                if self
-                    .parameters
-                    .iter()
-                    .find(|p| p.name == name.as_str())
-                    .is_none()
-                {
+                if !self.parameters.iter().any(|p| p.name == name.as_str()) {
                     self.parameters.push(p);
                 }
             }
@@ -400,7 +490,7 @@ pub type DefaultParameterRaw = Parameter<DefaultSchemaRaw>;
 
 /// Request parameter object.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#parameterObject
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#parameterObject>
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Parameter<S> {
@@ -453,7 +543,7 @@ pub struct Parameter<S> {
 
 /// Items object.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#itemsObject
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#itemsObject>
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Items {
@@ -600,7 +690,7 @@ pub type DefaultOperationRaw = Operation<DefaultParameterRaw, DefaultResponseRaw
 
 /// Operation object.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#operationObject
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#operationObject>
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Operation<P, R> {
@@ -648,7 +738,12 @@ impl<S> Operation<Parameter<S>, Response<S>> {
             .rev()
         {
             if let Some(n) = names.pop() {
-                p.name = n;
+                if let Some((name, pattern)) = n.split_once(':') {
+                    p.name = name.to_string();
+                    p.pattern = Some(pattern.to_string());
+                } else {
+                    p.name = n;
+                }
             } else {
                 break;
             }
@@ -658,8 +753,8 @@ impl<S> Operation<Parameter<S>, Response<S>> {
 
 /// Reference object.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#referenceObject
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#referenceObject>
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]
 pub struct Reference {
     #[serde(rename = "$ref")]
     pub reference: String,
@@ -683,7 +778,7 @@ pub type DefaultResponseRaw = Response<DefaultSchemaRaw>;
 
 /// Response object.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#responseObject
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#responseObject>
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Response<S> {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -696,7 +791,7 @@ pub struct Response<S> {
 
 /// Header object.
 ///
-/// https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#headerObject
+/// <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#headerObject>
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Header {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -823,9 +918,11 @@ where
     /// Fetch the description for this schema.
     pub fn get_description(&self) -> Option<String> {
         match *self {
-            Resolvable::Raw(ref s) => s.read().description().map(String::from),
-            // We don't want parameters/fields to describe the actual refrenced object.
-            Resolvable::Resolved { ref old, .. } => old.read().description().map(String::from),
+            Resolvable::Raw(ref s) => s.read().unwrap().description().map(String::from),
+            // We don't want parameters/fields to describe the actual referenced object.
+            Resolvable::Resolved { ref old, .. } => {
+                old.read().unwrap().description().map(String::from)
+            }
         }
     }
 }

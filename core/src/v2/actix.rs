@@ -1,20 +1,38 @@
+#[cfg(feature = "actix3-validator")]
+extern crate actix_web_validator2 as actix_web_validator;
+#[cfg(feature = "actix4-validator")]
+extern crate actix_web_validator3 as actix_web_validator;
+
 #[cfg(feature = "actix-multipart")]
 use super::schema::TypedData;
 use super::{
     models::{
-        DefaultOperationRaw, DefaultResponseRaw, DefaultSchemaRaw, Either, Items, Parameter,
-        ParameterIn, Response, SecurityScheme,
+        DefaultOperationRaw, DefaultSchemaRaw, Either, Items, Parameter, ParameterIn, Response,
+        SecurityScheme,
     },
     schema::{Apiv2Errors, Apiv2Operation, Apiv2Schema},
 };
+#[cfg(not(feature = "actix4"))]
 use crate::util::{ready, Ready};
+#[cfg(any(feature = "actix3", feature = "actix4"))]
+use actix_web::web::ReqData;
+#[cfg(not(feature = "actix4"))]
+use actix_web::Error;
+#[cfg(feature = "actix4")]
+use actix_web::{body::BoxBody, ResponseError};
 use actix_web::{
     http::StatusCode,
-    web::{Bytes, Data, Form, Json, Path, Payload, Query, ReqData},
-    Error, HttpRequest, HttpResponse, Responder,
+    web::{Bytes, Data, Form, Json, Path, Payload, Query},
+    HttpRequest, HttpResponse, Responder,
 };
-use pin_project::pin_project;
 
+use pin_project_lite::pin_project;
+
+#[cfg(any(feature = "actix4-validator", feature = "actix3-validator"))]
+use actix_web_validator::{
+    Json as ValidatedJson, Path as ValidatedPath, QsQuery as ValidatedQsQuery,
+    Query as ValidatedQuery,
+};
 use serde::Serialize;
 #[cfg(feature = "serde_qs")]
 use serde_qs::actix::QsQuery;
@@ -39,7 +57,9 @@ use std::{
 /// and/or update the global map of definitions.
 pub trait OperationModifier: Apiv2Schema + Sized {
     /// Update the parameters list in the given operation (if needed).
-    fn update_parameter(_op: &mut DefaultOperationRaw) {}
+    fn update_parameter(op: &mut DefaultOperationRaw) {
+        update_parameter::<Self>(op);
+    }
 
     /// Update the responses map in the given operation (if needed).
     fn update_response(_op: &mut DefaultOperationRaw) {}
@@ -66,7 +86,9 @@ impl<T> OperationModifier for T
 where
     T: Apiv2Schema,
 {
-    default fn update_parameter(_op: &mut DefaultOperationRaw) {}
+    default fn update_parameter(op: &mut DefaultOperationRaw) {
+        update_parameter::<Self>(op);
+    }
 
     default fn update_response(_op: &mut DefaultOperationRaw) {}
 
@@ -141,11 +163,12 @@ where
 
     fn update_response(op: &mut DefaultOperationRaw) {
         T::update_response(op);
-        update_error_definitions_from_schema_type::<E>(op);
+        E::update_error_definitions(op);
     }
 
     fn update_definitions(map: &mut BTreeMap<String, DefaultSchemaRaw>) {
         T::update_definitions(map);
+        E::update_definitions(map);
     }
 
     fn update_security_definitions(map: &mut BTreeMap<String, SecurityScheme>) {
@@ -158,8 +181,10 @@ where
 impl<T> Apiv2Schema for Data<T> {}
 #[cfg(not(feature = "nightly"))]
 impl<T> OperationModifier for Data<T> {}
+#[cfg(any(feature = "actix3", feature = "actix4"))]
 impl<T: std::clone::Clone> Apiv2Schema for ReqData<T> {}
 #[cfg(not(feature = "nightly"))]
+#[cfg(any(feature = "actix3", feature = "actix4"))]
 impl<T: std::clone::Clone> OperationModifier for ReqData<T> {}
 
 macro_rules! impl_empty({ $($ty:ty),+ } => {
@@ -170,6 +195,53 @@ macro_rules! impl_empty({ $($ty:ty),+ } => {
     )+
 });
 
+#[cfg(feature = "actix4")]
+/// Workaround for possibility to directly return HttpResponse from closure handler.
+///
+/// This is needed after actix removed `impl Future` from `HttpResponse`:
+/// <https://github.com/actix/actix-web/pull/2601>
+///
+/// Example:
+//////
+/// ```ignore
+/// .route(web::get().to(||
+///     async move {
+///         paperclip::actix::HttpResponseWrapper(
+///             HttpResponse::Ok().body("Hi there!")
+///         )
+///     }
+/// ))
+/// ```
+pub struct HttpResponseWrapper(pub HttpResponse);
+
+#[cfg(feature = "actix4")]
+impl Responder for HttpResponseWrapper {
+    type Body = <HttpResponse as Responder>::Body;
+
+    fn respond_to(self, req: &HttpRequest) -> HttpResponse<Self::Body> {
+        self.0.respond_to(req)
+    }
+}
+
+#[cfg(feature = "actix4")]
+impl<F> Apiv2Operation for F
+where
+    F: Future<Output = HttpResponseWrapper>,
+{
+    fn operation() -> DefaultOperationRaw {
+        Default::default()
+    }
+
+    fn security_definitions() -> BTreeMap<String, SecurityScheme> {
+        Default::default()
+    }
+
+    fn definitions() -> BTreeMap<String, DefaultSchemaRaw> {
+        Default::default()
+    }
+}
+
+#[cfg(not(feature = "actix4"))]
 impl Apiv2Operation for HttpResponse {
     fn operation() -> DefaultOperationRaw {
         Default::default()
@@ -218,8 +290,12 @@ mod manual_impl {
     impl_simple!(chrono::NaiveDateTime);
     #[cfg(feature = "rust_decimal")]
     impl_simple!(rust_decimal::Decimal);
-    #[cfg(feature = "uuid")]
-    impl_simple!(uuid::Uuid);
+    #[cfg(feature = "url")]
+    impl_simple!(url::Url);
+    #[cfg(feature = "uuid0")]
+    impl_simple!(uuid0_dep::Uuid);
+    #[cfg(feature = "uuid1")]
+    impl_simple!(uuid1_dep::Uuid);
 }
 
 #[cfg(feature = "chrono")]
@@ -229,7 +305,9 @@ impl<T: chrono::TimeZone> OperationModifier for chrono::DateTime<T> {}
 
 #[cfg(feature = "nightly")]
 impl<T> Apiv2Schema for Json<T> {
-    default const NAME: Option<&'static str> = None;
+    default fn name() -> Option<String> {
+        None
+    }
 
     default fn raw_schema() -> DefaultSchemaRaw {
         Default::default()
@@ -238,7 +316,9 @@ impl<T> Apiv2Schema for Json<T> {
 
 /// JSON needs specialization because it updates the global definitions.
 impl<T: Apiv2Schema> Apiv2Schema for Json<T> {
-    const NAME: Option<&'static str> = T::NAME;
+    fn name() -> Option<String> {
+        T::name()
+    }
 
     fn raw_schema() -> DefaultSchemaRaw {
         T::raw_schema()
@@ -281,6 +361,45 @@ where
     }
 }
 
+#[cfg(all(
+    any(feature = "actix4-validator", feature = "actix3-validator"),
+    feature = "nightly"
+))]
+impl<T> Apiv2Schema for ValidatedJson<T> {
+    fn name() -> Option<String> {
+        None
+    }
+
+    default fn raw_schema() -> DefaultSchemaRaw {
+        Default::default()
+    }
+}
+
+#[cfg(any(feature = "actix4-validator", feature = "actix3-validator"))]
+impl<T: Apiv2Schema> Apiv2Schema for ValidatedJson<T> {
+    fn name() -> Option<String> {
+        T::name()
+    }
+
+    fn raw_schema() -> DefaultSchemaRaw {
+        T::raw_schema()
+    }
+}
+
+#[cfg(any(feature = "actix4-validator", feature = "actix3-validator"))]
+impl<T> OperationModifier for ValidatedJson<T>
+where
+    T: Apiv2Schema,
+{
+    fn update_parameter(op: &mut DefaultOperationRaw) {
+        Json::<T>::update_parameter(op);
+    }
+
+    fn update_response(op: &mut DefaultOperationRaw) {
+        Json::<T>::update_response(op);
+    }
+}
+
 #[cfg(feature = "actix-multipart")]
 impl OperationModifier for actix_multipart::Multipart {
     fn update_parameter(op: &mut DefaultOperationRaw) {
@@ -301,6 +420,11 @@ impl OperationModifier for actix_session::Session {
     fn update_definitions(_map: &mut BTreeMap<String, DefaultSchemaRaw>) {}
 }
 
+#[cfg(feature = "actix-identity")]
+impl OperationModifier for actix_identity::Identity {
+    fn update_definitions(_map: &mut BTreeMap<String, DefaultSchemaRaw>) {}
+}
+
 #[cfg(feature = "actix-files")]
 impl OperationModifier for actix_files::NamedFile {
     fn update_definitions(_map: &mut BTreeMap<String, DefaultSchemaRaw>) {}
@@ -309,7 +433,9 @@ impl OperationModifier for actix_files::NamedFile {
 macro_rules! impl_param_extractor ({ $ty:ty => $container:ident } => {
     #[cfg(feature = "nightly")]
     impl<T> Apiv2Schema for $ty {
-        default const NAME: Option<&'static str> = None;
+        default fn name() -> Option<String> {
+            None
+        }
 
         default fn raw_schema() -> DefaultSchemaRaw {
             Default::default()
@@ -375,7 +501,9 @@ fn map_schema_to_items(schema: &DefaultSchemaRaw) -> Items {
 /// `formData` can refer to the global definitions.
 #[cfg(feature = "nightly")]
 impl<T: Apiv2Schema> Apiv2Schema for Form<T> {
-    const NAME: Option<&'static str> = T::NAME;
+    fn name() -> Option<String> {
+        T::name()
+    }
 
     fn raw_schema() -> DefaultSchemaRaw {
         T::raw_schema()
@@ -387,16 +515,31 @@ impl_param_extractor!(Query<T> => Query);
 impl_param_extractor!(Form<T> => FormData);
 #[cfg(feature = "serde_qs")]
 impl_param_extractor!(QsQuery<T> => Query);
-#[cfg(feature = "actix-web-validator")]
+#[cfg(any(feature = "actix4-validator", feature = "actix3-validator"))]
 impl_param_extractor!(ValidatedPath<T> => Path);
-#[cfg(feature = "actix-web-validator")]
+#[cfg(any(feature = "actix4-validator", feature = "actix3-validator"))]
 impl_param_extractor!(ValidatedQuery<T> => Query);
-#[cfg(feature = "actix-web-validator")]
+#[cfg(any(feature = "actix4-validator", feature = "actix3-validator"))]
 impl_param_extractor!(ValidatedQsQuery<T> => Query);
-#[cfg(feature = "actix-web-validator")]
-impl_param_extractor!(ValidatedJson<T> => Body);
 
 macro_rules! impl_path_tuple ({ $($ty:ident),+ } => {
+    #[cfg(all(any(feature = "actix4-validator", feature = "actix3-validator"), feature = "nightly"))]
+    impl<$($ty,)+> Apiv2Schema for ValidatedPath<($($ty,)+)> {}
+
+    #[cfg(all(not(feature = "nightly"), any(feature = "actix4-validator", feature = "actix3-validator")))]
+    impl<$($ty: Apiv2Schema,)+> Apiv2Schema for ValidatedPath<($($ty,)+)> {}
+
+    #[cfg(any(feature = "actix4-validator", feature = "actix3-validator"))]
+    impl<$($ty,)+> OperationModifier for ValidatedPath<($($ty,)+)>
+        where $($ty: Apiv2Schema,)+
+    {
+        fn update_parameter(op: &mut DefaultOperationRaw) {
+            $(
+                Path::<$ty>::update_parameter(op);
+            )+
+        }
+    }
+
     #[cfg(feature = "nightly")]
     impl<$($ty,)+> Apiv2Schema for Path<($($ty,)+)> {}
 
@@ -447,13 +590,23 @@ impl_path_tuple!(A, B);
 impl_path_tuple!(A, B, C);
 impl_path_tuple!(A, B, C, D);
 impl_path_tuple!(A, B, C, D, E);
+impl_path_tuple!(A, B, C, D, E, F);
+impl_path_tuple!(A, B, C, D, E, F, G);
+impl_path_tuple!(A, B, C, D, E, F, G, H);
+impl_path_tuple!(A, B, C, D, E, F, G, H, I);
+impl_path_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_path_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_path_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
+impl_path_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M);
 
 /// Wrapper for wrapping over `impl Responder` thingies (to avoid breakage).
 pub struct ResponderWrapper<T>(pub T);
 
 #[cfg(feature = "nightly")]
 impl<T: Responder> Apiv2Schema for ResponderWrapper<T> {
-    default const NAME: Option<&'static str> = None;
+    default fn name() -> Option<String> {
+        None
+    }
 
     default fn raw_schema() -> DefaultSchemaRaw {
         DefaultSchemaRaw::default()
@@ -466,6 +619,23 @@ impl<T: Responder> Apiv2Schema for ResponderWrapper<T> {}
 #[cfg(not(feature = "nightly"))]
 impl<T: Responder> OperationModifier for ResponderWrapper<T> {}
 
+#[cfg(feature = "actix4")]
+impl Apiv2Schema for actix_web::dev::Response<actix_web::body::BoxBody> {}
+
+#[cfg(feature = "actix4")]
+impl OperationModifier for actix_web::dev::Response<actix_web::body::BoxBody> {}
+
+#[cfg(feature = "actix4")]
+impl<T: Responder> Responder for ResponderWrapper<T> {
+    type Body = T::Body;
+
+    #[inline]
+    fn respond_to(self, req: &HttpRequest) -> HttpResponse<Self::Body> {
+        self.0.respond_to(req)
+    }
+}
+
+#[cfg(not(feature = "actix4"))]
 impl<T: Responder> Responder for ResponderWrapper<T> {
     type Error = T::Error;
     type Future = T::Future;
@@ -476,19 +646,35 @@ impl<T: Responder> Responder for ResponderWrapper<T> {
     }
 }
 
-/// Wrapper for all response types from handlers. This holds the actual value
-/// returned by the handler and a unit struct (autogenerated by the plugin) which
-/// is used for generating operation information.
-#[pin_project]
-pub struct ResponseWrapper<T, H>(#[pin] pub T, pub H);
+// Wrapper for all response types from handlers. This holds the actual value
+// returned by the handler and a unit struct (autogenerated by the plugin) which
+// is used for generating operation information.
+pin_project! {
+    pub struct ResponseWrapper<T, H> {
+        #[pin]
+        pub responder: T,
+        pub operations: H,
+    }
+}
 
+#[cfg(feature = "actix4")]
+impl<T: Responder, H> Responder for ResponseWrapper<T, H> {
+    type Body = T::Body;
+
+    #[inline]
+    fn respond_to(self, req: &HttpRequest) -> HttpResponse<Self::Body> {
+        self.responder.respond_to(req)
+    }
+}
+
+#[cfg(not(feature = "actix4"))]
 impl<T: Responder, H> Responder for ResponseWrapper<T, H> {
     type Error = <T as Responder>::Error;
     type Future = <T as Responder>::Future;
 
     #[inline]
     fn respond_to(self, req: &HttpRequest) -> Self::Future {
-        self.0.respond_to(req)
+        self.responder.respond_to(req)
     }
 }
 
@@ -503,7 +689,7 @@ where
     #[inline]
     fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().project();
-        this.0.poll(ctx)
+        this.responder.poll(ctx)
     }
 }
 
@@ -523,6 +709,10 @@ where
 
     fn definitions() -> BTreeMap<String, DefaultSchemaRaw> {
         H::definitions()
+    }
+
+    fn is_visible() -> bool {
+        H::is_visible()
     }
 }
 
@@ -548,19 +738,12 @@ where
     }
 }
 
-/// Given a schema type that represents an error, add the responses
-/// representing those errors.
-fn update_error_definitions_from_schema_type<T>(op: &mut DefaultOperationRaw)
+fn update_parameter<T>(op: &mut DefaultOperationRaw)
 where
-    T: Apiv2Errors,
+    T: Apiv2Schema,
 {
-    for (status, def_name) in T::ERROR_MAP {
-        let response = DefaultResponseRaw {
-            description: Some((*def_name).to_string()),
-            ..Default::default()
-        };
-        op.responses
-            .insert(status.to_string(), Either::Right(response));
+    for parameter in T::header_parameter_schema() {
+        op.parameters.push(Either::Right(parameter))
     }
 }
 
@@ -569,10 +752,10 @@ fn update_security<T>(op: &mut DefaultOperationRaw)
 where
     T: Apiv2Schema,
 {
-    if let (Some(name), Some(scheme)) = (T::NAME, T::security_scheme()) {
+    if let (Some(name), Some(scheme)) = (T::name(), T::security_scheme()) {
         let mut security_map = BTreeMap::new();
         let scopes = scheme.scopes.keys().map(String::clone).collect();
-        security_map.insert(name.into(), scopes);
+        security_map.insert(name, scopes);
         op.security.push(security_map);
     }
 }
@@ -582,8 +765,8 @@ fn update_security_definitions<T>(map: &mut BTreeMap<String, SecurityScheme>)
 where
     T: Apiv2Schema,
 {
-    if let (Some(name), Some(new)) = (T::NAME, T::security_scheme()) {
-        new.update_definitions(name, map);
+    if let (Some(name), Some(new)) = (T::name(), T::security_scheme()) {
+        new.update_definitions(&name, map);
     }
 }
 
@@ -611,6 +794,27 @@ macro_rules! json_with_status {
             }
         }
 
+        #[cfg(feature = "actix4")]
+        impl<T> Responder for $name<T>
+        where
+            T: Serialize + Apiv2Schema,
+        {
+            type Body = BoxBody;
+
+            fn respond_to(self, _: &HttpRequest) -> HttpResponse<BoxBody> {
+                let status: StatusCode = $status;
+                let body = match serde_json::to_string(&self.0) {
+                    Ok(body) => body,
+                    Err(e) => return e.error_response(),
+                };
+
+                HttpResponse::build(status)
+                    .content_type("application/json")
+                    .body(body)
+            }
+        }
+
+        #[cfg(not(feature = "actix4"))]
         impl<T> Responder for $name<T>
         where
             T: Serialize + Apiv2Schema,
@@ -635,7 +839,9 @@ macro_rules! json_with_status {
         where
             T: Serialize + Apiv2Schema,
         {
-            const NAME: Option<&'static str> = T::NAME;
+            fn name() -> Option<String> {
+                T::name()
+            }
 
             fn raw_schema() -> DefaultSchemaRaw {
                 T::raw_schema()
@@ -677,6 +883,18 @@ impl fmt::Display for NoContent {
     }
 }
 
+#[cfg(feature = "actix4")]
+impl Responder for NoContent {
+    type Body = BoxBody;
+
+    fn respond_to(self, _: &HttpRequest) -> HttpResponse<BoxBody> {
+        HttpResponse::build(StatusCode::NO_CONTENT)
+            .content_type("application/json")
+            .finish()
+    }
+}
+
+#[cfg(not(feature = "actix4"))]
 impl Responder for NoContent {
     type Error = Error;
     type Future = Ready<Result<HttpResponse, Error>>;

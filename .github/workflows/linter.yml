@@ -1,0 +1,62 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  schedule:
+    - cron: "0 7 * * *"
+
+jobs:
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        experimental: [false]
+        include:
+          - profile: stable
+            experimental: false
+            exclude: -A clippy::derivable-impls
+          - profile: nightly
+            experimental: true
+            exclude: -A clippy::uninlined-format-args -A clippy::derivable-impls
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - uses: actions-rs/toolchain@v1
+        with:
+          components: clippy
+          toolchain: ${{ matrix.profile }}
+          override: true
+      - uses: actions-rs/clippy-check@v1
+        continue-on-error: ${{ matrix.experimental }}
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all --features "actix4 cli chrono url uuid swagger-ui v3" -- -D clippy::all ${{ matrix.exclude }}
+
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+          - stable
+          - nightly
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          components: rustfmt
+          toolchain: ${{ matrix.rust }}
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          command: fmt
+          args: --all -- --check

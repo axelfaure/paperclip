@@ -1,5 +1,6 @@
 use std::{
     env,
+    fmt::Write as _,
     fs::File,
     io::{Read, Write},
     path::PathBuf,
@@ -32,7 +33,7 @@ mod template {
 
     #[derive(Debug, Copy, Clone)]
     #[allow(dead_code, non_camel_case_types)]
-    pub enum TEMPLATE {",
+    pub enum Template {",
     );
 
     for (name, _) in files {
@@ -40,7 +41,7 @@ mod template {
             "
         ",
         );
-        contents.push_str(&name);
+        contents.push_str(name);
         contents.push(',');
     }
 
@@ -52,18 +53,19 @@ mod template {
     let source_path = PathBuf::from(&out_dir).join("template.rs");
     for (name, file) in files {
         println!("cargo:rerun-if-changed={}", file);
-        let thing = load_file(root.join(&file));
-        contents.push_str(&format!(
+        let thing = load_file(root.join(file));
+        let _ = &write!(
+            contents,
             "
     pub const {}: &str = {:?};
 ",
             name, thing
-        ));
+        );
     }
 
     contents.push_str(
         "
-    pub fn render<C>(t: TEMPLATE, context: &C) -> tinytemplate::error::Result<String>
+    pub fn render<C>(t: Template, context: &C) -> tinytemplate::error::Result<String>
         where C: serde::Serialize
     {
         let mut temp = TinyTemplate::new();
@@ -71,11 +73,12 @@ mod template {
     );
 
     for (name, _) in files {
-        contents.push_str(&format!(
+        let _ = &write!(
+            contents,
             "
-            TEMPLATE::{name} => {name},",
+            Template::{name} => {name},",
             name = name
-        ));
+        );
     }
 
     contents.push_str(
@@ -88,6 +91,6 @@ mod template {
 ",
     );
 
-    let mut fd = File::create(&source_path).unwrap();
+    let mut fd = File::create(source_path).unwrap();
     fd.write_all(contents.as_bytes()).unwrap();
 }
