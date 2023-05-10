@@ -42,7 +42,7 @@ use actix_web_validator::{
     Query as ValidatedQuery,
 };
 use serde::Serialize;
-#[cfg(feature = "serde_qs")]
+#[cfg(any(feature = "serde_qs-actix3", feature = "serde_qs-actix4"))]
 use serde_qs::actix::QsQuery;
 
 use std::{
@@ -513,7 +513,7 @@ impl<T: Apiv2Schema> Apiv2Schema for Form<T> {
 impl_param_extractor!(Path<T> => Path);
 impl_param_extractor!(Query<T> => Query);
 impl_param_extractor!(Form<T> => FormData);
-#[cfg(feature = "serde_qs")]
+#[cfg(any(feature = "serde_qs-actix3", feature = "serde_qs-actix4"))]
 impl_param_extractor!(QsQuery<T> => Query);
 #[cfg(any(feature = "actix4-validator", feature = "actix3-validator"))]
 impl_param_extractor!(ValidatedPath<T> => Path);

@@ -32,7 +32,7 @@ url = { version = "2", optional = true }
 uuid0_dep = { version = "0", package = "uuid", optional = true }
 uuid1_dep = { version = "1", package = "uuid", optional = true }
 thiserror = "1.0"
-serde_qs-actix3 = { version = "0.8", features = ["actix3"], optional = true, package = "serde_qs" }
+serde_qs-actix3 = { version = "0.8", features = ["actix"], optional = true, package = "serde_qs" }
 serde_qs-actix4 = { version = "0.10", features = ["actix4"], optional = true, package = "serde_qs" }
 actix-web-validator2 = { version = "2.2", optional = true, package = "actix-web-validator" }
 actix-web-validator3 = { version = "5.0", optional = true, package = "actix-web-validator" }
