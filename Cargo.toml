@@ -48,7 +48,7 @@ actix-rt1 = { version = "1.0", package = "actix-rt" }
 actix-service1 = { version = "1", package = "actix-service" }
 actix-service2 = { version = "2", package = "actix-service" }
 actix-web-validator2 = { version = "2.2", package = "actix-web-validator" }
-actix-web-validator3 = { version = "3.0", package = "actix-web-validator" }
+actix-web-validator3 = { version = "5.0", package = "actix-web-validator" }
 actix-web2 = { version = "2", default-features = false, package = "actix-web" }
 actix-web3 = { version = "3", default-features = false, package = "actix-web" }
 actix-web4 = { version = "4", default-features = false, package = "actix-web" }
@@ -61,7 +61,7 @@ log = { version = "0.4", features = ["kv_unstable"] }
 insta = "1.0"
 env_logger = "0.8"
 validator12 = { version = "0.12", features = ["derive"], package = "validator" }
-validator14 = { version = "0.14", features = ["derive"], package = "validator" }
+validator14 = { version = "0.16", features = ["derive"], package = "validator" }
 actix-web-httpauth3 = { version = "0.5", package = "actix-web-httpauth" }
 actix-web-httpauth4 = { version = "0.6", package = "actix-web-httpauth" }
 
