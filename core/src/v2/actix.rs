@@ -56,6 +56,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use actix_multipart::form::MultipartForm;
 
 /// Actix-specific trait for indicating that this entity can modify an operation
 /// and/or update the global map of definitions.
@@ -517,6 +518,7 @@ impl<T: Apiv2Schema> Apiv2Schema for Form<T> {
 impl_param_extractor!(Path<T> => Path);
 impl_param_extractor!(Query<T> => Query);
 impl_param_extractor!(Form<T> => FormData);
+impl_param_extractor!(MultipartForm<T> => FormData);
 #[cfg(any(
     feature = "serde_qs-actix3",
     feature = "serde_qs-actix4",
