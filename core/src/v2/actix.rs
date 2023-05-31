@@ -555,21 +555,15 @@ impl<T: DeserializeOwned + Apiv2Schema> Apiv2Schema for actix_multipart::form::j
 #[cfg(feature = "actix-multipart")]
 impl<T: MultipartCollect + Apiv2Schema> OperationModifier for MultipartForm<T> {
     fn update_parameter(op: &mut DefaultOperationRaw) {
-        let def = T::raw_schema();
-        for (k, v) in def.properties {
-            op.parameters.push(Either::Right(Parameter {
-                in_: ParameterIn::FormData,
-                required: def.required.contains(&k),
-                data_type: v.data_type,
-                format: v.format,
-                enum_: v.enum_,
-                description: v.description,
-                collection_format: None, // this defaults to csv
-                items: v.items.as_deref().map(map_schema_to_items),
-                name: k,
-                ..Default::default()
-            }));
-        }
+        op.parameters.push(Either::Right(Parameter {
+            description: None,
+            in_: ParameterIn::FormData,
+            name: "file_data".into(),
+            required: true,
+            data_type: Some(<actix_multipart::Multipart as TypedData>::data_type()),
+            format: <actix_multipart::Multipart as TypedData>::format(),
+            ..Default::default()
+        }));
     }
 }
 
