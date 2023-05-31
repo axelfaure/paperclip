@@ -565,6 +565,10 @@ impl<T: MultipartCollect + Apiv2Schema> OperationModifier for MultipartForm<T> {
             ..Default::default()
         }));
     }
+
+    fn update_definitions(_map: &mut BTreeMap<String, DefaultSchemaRaw>) {
+        return;
+    }
 }
 
 impl_param_extractor!(Path<T> => Path);
